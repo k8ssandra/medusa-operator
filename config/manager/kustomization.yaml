@@ -1,0 +1,7 @@
+resources:
+- manager.yaml
+
+images:
+- name: controller
+  newName: docker.io/jsanda/medusa-operator
+  newTag: latest

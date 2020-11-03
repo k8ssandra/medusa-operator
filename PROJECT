@@ -1,0 +1,11 @@
+domain: k8ssandra.io
+layout: go.kubebuilder.io/v2
+projectName: medusa-operator
+repo: github.com/k8ssandra/medusa-operator
+resources:
+- group: cassandra
+  kind: CassandraBackup
+  version: v1alpha1
+version: 3-alpha
+plugins:
+  go.sdk.operatorframework.io/v2-alpha: {}

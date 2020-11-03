@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reaper-operator
+  namespace: system
+  labels:
+    control-plane: reaper-operator
+spec:
+  selector:
+    matchLabels:
+      control-plane: reaper-operator
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        control-plane: reaper-operator
+    spec:
+      containers:
+      - command:
+        - /manager
+        args:
+        - --enable-leader-election
+        image: controller:latest
+        name: manager
+        resources:
+          limits:
+            cpu: 100m
+            memory: 30Mi
+          requests:
+            cpu: 100m
+            memory: 20Mi
+      terminationGracePeriodSeconds: 10

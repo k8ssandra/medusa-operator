@@ -1,0 +1,28 @@
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: medusa-operator
+rules:
+- apiGroups:
+  - cassandra.k8ssandra.io
+  resources:
+  - cassandrabackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cassandra.k8ssandra.io
+  resources:
+  - cassandrabackups/status
+  verbs:
+  - get
+  - patch
+  - update
