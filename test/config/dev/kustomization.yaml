@@ -1,0 +1,5 @@
+namespace: medusa-dev
+
+resources:
+- ../cass-operator
+- ../cassdc

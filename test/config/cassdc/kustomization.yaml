@@ -1,0 +1,10 @@
+resources:
+- cassdc.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- name: medusa-config
+  files:
+    - medusa.ini
