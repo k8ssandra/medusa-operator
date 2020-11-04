@@ -1,19 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: reaper-operator
-  namespace: system
+  name: medusa-operator
   labels:
-    control-plane: reaper-operator
+    control-plane: medusa-operator
 spec:
   selector:
     matchLabels:
-      control-plane: reaper-operator
+      control-plane: medusa-operator
   replicas: 1
   template:
     metadata:
       labels:
-        control-plane: reaper-operator
+        control-plane: medusa-operator
     spec:
       containers:
       - command:
@@ -22,6 +21,12 @@ spec:
         - --enable-leader-election
         image: controller:latest
         name: manager
+        imagePullPolicy: Always
+        env:
+          - name: WATCH_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
         resources:
           limits:
             cpu: 100m

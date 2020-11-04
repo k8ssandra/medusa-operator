@@ -1,11 +1,29 @@
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   creationTimestamp: null
   name: medusa-operator
+  namespace: medusa-operator
 rules:
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cassandra.datastax.com
+  resources:
+  - cassandradatacenters
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - cassandra.k8ssandra.io
   resources:

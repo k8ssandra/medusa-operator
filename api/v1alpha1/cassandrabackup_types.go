@@ -25,11 +25,12 @@ import (
 
 // CassandraBackupSpec defines the desired state of CassandraBackup
 type CassandraBackupSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// The name of the backup.
+	// TODO document format of generated name
+	Name string `json:"name,omitempty"`
 
-	// Foo is an example field of CassandraBackup. Edit CassandraBackup_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// The name of the CassandraDatacenter to back up
+	CassandraDatacenter string `json:"cassandraDatacenter"`
 }
 
 // CassandraBackupStatus defines the observed state of CassandraBackup

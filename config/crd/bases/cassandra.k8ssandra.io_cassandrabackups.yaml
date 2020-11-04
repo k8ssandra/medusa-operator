@@ -36,10 +36,15 @@ spec:
         spec:
           description: CassandraBackupSpec defines the desired state of CassandraBackup
           properties:
-            foo:
-              description: Foo is an example field of CassandraBackup. Edit CassandraBackup_types.go
-                to remove/update
+            cassandraDatacenter:
+              description: The name of the CassandraDatacenter to back up
               type: string
+            name:
+              description: The name of the backup. TODO document format of generated
+                name
+              type: string
+          required:
+          - cassandraDatacenter
           type: object
         status:
           description: CassandraBackupStatus defines the observed state of CassandraBackup

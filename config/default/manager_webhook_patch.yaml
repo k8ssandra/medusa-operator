@@ -1,9 +1,11 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
-  namespace: system
+  name: medusa-operator
 spec:
+  selector:
+    matchLabels:
+      control-plane: medusa-operator
   template:
     spec:
       containers:
