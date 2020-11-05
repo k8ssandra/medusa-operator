@@ -129,6 +129,10 @@ else
 KUSTOMIZE=$(shell which kustomize)
 endif
 
+.PHONY: backup-client-build
+backup-client-build:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o ./backup-client/bin/backup-client ./backup-client/main.go
+
 # Generate bundle manifests and metadata, then validate generated files.
 .PHONY: bundle
 bundle: manifests

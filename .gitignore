@@ -24,3 +24,5 @@ bin
 *~
 
 testbin
+
+backup-client/bin
