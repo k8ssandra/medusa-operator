@@ -23,6 +23,10 @@ IMAGE_BASE=$(REG)/$(ORG)/$(PROJECT)
 REV_IMAGE=$(IMAGE_BASE):$(REV)
 LATEST_IMAGE=$(IMAGE_BASE):latest
 
+BACKUP_CLIENT_IMAGE_BASE=$(REG)/$(ORG)/backup-client
+BACKUP_CLIENT_REV_IMAGE=$(BACKUP_CLIENT_IMAGE_BASE):$(REV)
+BACKUP_CLIENT_LATEST_IMAGE=$(BACKUP_CLIENT_IMAGE_BASE):latest
+
 # Image URL to use all building/pushing image targets
 IMG ?= $(LATEST_IMAGE)
 
@@ -132,6 +136,17 @@ endif
 .PHONY: backup-client-build
 backup-client-build:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o ./backup-client/bin/backup-client ./backup-client/main.go
+
+PHONY: backup-client-docker-build
+backup-client-docker-build:
+	@echo Building ${BACKUP_CLIENT_REV_IMAGE}
+	docker build . -t ${BACKUP_CLIENT_REV_IMAGE}
+	docker tag ${BACKUP_CLIENT_REV_IMAGE} ${BACKUP_CLIENT_LATEST_IMAGE}
+
+PHONY: backup-client-docker-push
+backup-client-docker-push:
+	docker push ${BACKUP_CLIENT_REV_IMAGE}
+	docker push ${BACKUP_CLIENT_LATEST_IMAGE}
 
 # Generate bundle manifests and metadata, then validate generated files.
 .PHONY: bundle
