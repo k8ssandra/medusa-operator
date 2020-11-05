@@ -135,7 +135,7 @@ endif
 
 .PHONY: backup-client-build
 backup-client-build:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o ./backup-client/bin/backup-client ./backup-client/main.go
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GO111MODULE=on go build -a -o ./backup-client/bin/backup-client ./backup-client/main.go
 
 PHONY: backup-client-docker-build
 backup-client-docker-build:
