@@ -4,7 +4,8 @@ resources:
 images:
   # Until cass-operator 1.5 is released, we need to use a more recent image than 1.4.1 in
   # order to get the merge functionality for containers specified in
-  # CassandraDatacenter.Spec.PodTemplateSpec.
+  # CassandraDatacenter.Spec.PodTemplateSpec. We also need a patch for a bug involving
+  # volume mounts. See https://k8ssandra.atlassian.net/browse/K8C-89 for details.
   - name: datastax/cass-operator
     newName: jsanda/cass-operator
-    newTag: a75754989cd29a38dd6406fdb75a5bad010f782d
+    newTag: k8c-89
