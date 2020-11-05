@@ -3,6 +3,7 @@ module github.com/k8ssandra/medusa-operator
 go 1.13
 
 require (
+	github.com/Azure/go-autorest v12.2.0+incompatible // indirect
 	github.com/datastax/cass-operator v1.4.1
 	github.com/go-logr/logr v0.1.0
 	github.com/golang/protobuf v1.4.2

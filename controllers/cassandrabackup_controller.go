@@ -91,7 +91,7 @@ func newBackupJob(backup *api.CassandraBackup) *v1batch.Job {
 					RestartPolicy: corev1.RestartPolicyOnFailure,
 					Containers: []corev1.Container{
 						{
-							Name:  "backup-client",
+							Name:  "backup_client",
 							Image: "busybox",
 							Args: []string{
 								"/bin/sh",
