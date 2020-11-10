@@ -14,7 +14,7 @@ type Client struct {
 }
 
 func NewClient(address string) (*Client, error) {
-	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock())
+	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.WaitForReady(false)))
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to %s: %s", address, err)
