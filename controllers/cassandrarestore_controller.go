@@ -34,8 +34,8 @@ type CassandraRestoreReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=cassandra.k8ssandra.io,resources=cassandrarestores,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=cassandra.k8ssandra.io,resources=cassandrarestores/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrarestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrarestores/status,verbs=get;update;patch
 
 func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	_ = context.Background()

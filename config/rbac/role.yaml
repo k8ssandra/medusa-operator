@@ -53,3 +53,23 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - cassandra.k8ssandra.io
+  resources:
+  - cassandrarestores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cassandra.k8ssandra.io
+  resources:
+  - cassandrarestores/status
+  verbs:
+  - get
+  - patch
+  - update
