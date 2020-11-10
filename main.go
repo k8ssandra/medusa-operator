@@ -28,8 +28,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	cassandrav1alpha1 "github.com/k8ssandra/medusa-operator/api/v1alpha1"
+	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/k8ssandra/medusa-operator/controllers"
+	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -41,7 +42,8 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(cassandrav1alpha1.AddToScheme(scheme))
+	utilruntime.Must(api.AddToScheme(scheme))
+	utilruntime.Must(cassdcapi.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
