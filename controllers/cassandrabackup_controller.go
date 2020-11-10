@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -31,10 +30,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	operrors "github.com/k8ssandra/medusa-operator/pkg/errors"
-	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
-	v1batch "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -180,20 +178,6 @@ func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Conte
 	return pods, nil
 }
 
-func getGrpcServiceAddresses(pods *[]corev1.Pod) ([]string, error) {
-	addresses := make([]string, 0)
-
-	for _, pod := range *pods {
-		if !hasMedusaSidecar(&pod) {
-			return nil, fmt.Errorf("pod %s does not have % sidecar container", pod.Name, backupSidecarName)
-		}
-		address := fmt.Sprintf("%s:%d", pod.Status.PodIP, backupSidecarPort)
-		addresses = append(addresses, address)
-	}
-
-	return addresses, nil
-}
-
 func isMedusaDeployed(pods []corev1.Pod) bool {
 	for _, pod := range pods {
 		if !hasMedusaSidecar(&pod) {
@@ -224,44 +208,6 @@ func doBackup(ctx context.Context, name string, pod *corev1.Pod) error {
 
 func backupFinished(backup *api.CassandraBackup) bool {
 	return !backup.Status.FinishTime.IsZero()
-}
-
-func newBackupJob(backup *api.CassandraBackup, medusaServices []string) *v1batch.Job {
-	return &v1batch.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: backup.Namespace,
-			Name:      backup.Name,
-		},
-		Spec: v1batch.JobSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					ServiceAccountName: "medusa-backup-client",
-					RestartPolicy: corev1.RestartPolicyOnFailure,
-					Containers: []corev1.Container{
-						{
-							Name: "backup-client",
-							Image: "jsanda/backup-client:latest",
-							Command: []string{ "/medusa-backup-client" },
-							Env: []corev1.EnvVar{
-								{
-									Name: "BACKUP_NAME",
-									Value: backup.Name,
-								},
-								{
-									Name: "BACKUP_NAMESPACE",
-									Value: backup.Namespace,
-								},
-								{
-									Name: "MEDUSA_SVC",
-									Value: strings.Join(medusaServices, ","),
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
 }
 
 func removeValue(slice []string, value string) []string {
