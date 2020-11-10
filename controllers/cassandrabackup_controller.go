@@ -69,6 +69,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 	backup := instance.DeepCopy()
 
+	// If the backup is already finished, there is nothing to do.
 	if backupFinished(backup) {
 		return ctrl.Result{Requeue: false}, nil
 	}
@@ -100,6 +101,11 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	err = r.Get(ctx, cassdcKey, cassdc)
 	if err != nil {
 		r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+	}
+
+	if err = r.addCassdcSpecToStatus(ctx, backup, cassdc); err != nil {
+		r.Log.Error(err, "failed to patch status with CassdcTemplateSpec", "CassandraDatacenter", cassdcKey)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
@@ -148,6 +154,59 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, backup *api.CassandraBackup, cassdc *cassdcapi.CassandraDatacenter) error {
+	templateSpec := api.CassandraDatacenterTemplateSpec{
+		// TODO The following properties need to be configurable for accessing and managing the cluster:
+		//      * ManagementApiAuth
+		//      * SuperuserSecretName
+		//      * ServiceAccount
+		//      * Users
+		//
+		// The following properties are intentionally left out as I do not think they are
+		// applicable to backup/restore scenarios:
+		//     * ReplaceNodes
+		//     * CanaryUpgrade
+		//     * RollingRestartRequested
+		//     * ForceUpgradeRacks
+		//     * DseWorkloads
+		Spec: cassdcapi.CassandraDatacenterSpec{
+			Size: cassdc.Spec.Size,
+			ServerVersion: cassdc.Spec.ServerVersion,
+			ServerType: cassdc.Spec.ServerType,
+			ServerImage: cassdc.Spec.ServerImage,
+
+			// Temporarily commenting out settning the Config property. It results in an
+			// error with this message: Invalid value: \"\": status.cassdcTemplateSpec.spec.config in body must be of type byte
+			//Config: []byte(cassdc.Spec.Config),
+
+			ManagementApiAuth: cassdc.Spec.ManagementApiAuth,
+			Resources: cassdc.Spec.Resources,
+			SystemLoggerResources: cassdc.Spec.SystemLoggerResources,
+			ConfigBuilderResources: cassdc.Spec.ConfigBuilderResources,
+			Racks: cassdc.Spec.Racks,
+			StorageConfig: cassdcapi.StorageConfig{
+				CassandraDataVolumeClaimSpec: cassdc.Spec.StorageConfig.CassandraDataVolumeClaimSpec.DeepCopy(),
+			},
+			ClusterName: cassdc.Spec.ClusterName,
+			Stopped: cassdc.Spec.Stopped,
+			ConfigBuilderImage: cassdc.Spec.ConfigBuilderImage,
+			AllowMultipleNodesPerWorker: cassdc.Spec.AllowMultipleNodesPerWorker,
+			ServiceAccount: cassdc.Spec.ServiceAccount,
+			NodeSelector: cassdc.Spec.NodeSelector,
+			PodTemplateSpec: cassdc.Spec.PodTemplateSpec.DeepCopy(),
+			Users: cassdc.Spec.Users,
+			AdditionalSeeds: cassdc.Spec.AdditionalSeeds,
+			// TODO set Networking
+			// TODO set Reaper
+		},
+	}
+
+	patch := client.MergeFrom(backup.DeepCopy())
+	backup.Status.CassdcTemplateSpec = templateSpec
+
+	return r.Status().Patch(ctx, backup, patch)
 }
 
 func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Context, cassdc *cassdcapi.CassandraDatacenter) ([]corev1.Pod, error) {

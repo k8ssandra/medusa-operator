@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -33,8 +34,18 @@ type CassandraBackupSpec struct {
 	CassandraDatacenter string `json:"cassandraDatacenter"`
 }
 
+type CassandraDatacenterTemplateSpec struct {
+	// Standard object metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	Spec cassdcapi.CassandraDatacenterSpec `json:"spec"`
+}
+
 // CassandraBackupStatus defines the observed state of CassandraBackup
 type CassandraBackupStatus struct {
+	CassdcTemplateSpec CassandraDatacenterTemplateSpec `json:"cassdcTemplateSpec"`
+
 	StartTime metav1.Time `json:"startTime,omitempty"`
 
 	FinishTime metav1.Time `json:"finishTime,omitempty"`
