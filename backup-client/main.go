@@ -4,57 +4,108 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
+	"sync"
 
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/k8ssandra/medusa-operator/pkg/medusa"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
-
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
-	backupSidecarPort = 50051
+	MedusaSvcEnvVar      = "MEDUSA_SVC"
+	BackupNameEnvVar     = "BACKUP_NAME"
+	BackupNamespaceEnvar = "BACKUP_NAMESPACE"
 )
 
+var (
+	logger = ctrl.Log.WithName("backup-client")
+
+	mgr manager.Manager
+)
+
+// +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrabackups,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrabackups/status,verbs=get;update;patch
+
 func main() {
-	err := api.AddToScheme(scheme.Scheme)
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	ctx := context.Background()
+
+	logger.Info("starting")
+
+	backupName := getEnvVar(BackupNameEnvVar)
+	backupNamespace := getEnvVar(BackupNamespaceEnvar)
+	medusaSvc := getEnvVar(MedusaSvcEnvVar)
+	medusaServices := strings.Split(medusaSvc, ",")
+
+	logger.Info("calling medusa gRPC services", "MedusaServices", medusaServices)
+
+	_, err := createK8sClient(backupNamespace)
 	if err != nil {
-		log.Fatalf("failed to register cassandrabackup scheme: %s", err)
+		fmt.Printf("failed to create k8s client: %s", err)
+		logger.Error(err, "failed to create k8s api client")
+		os.Exit(1)
 	}
 
-	cfg := config.GetConfigOrDie()
-
-	k8sClient, err := client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	if err != nil {
-		log.Fatalf("failed to create controller-runtime client: %s", err)
+	logger.Info("starting backups")
+	var wg = sync.WaitGroup{}
+	for _, svc := range medusaServices {
+		logger.Info("submitting request")
+		go func(addr string) {
+			wg.Add(1)
+			if err := doBackup(ctx, backupName, addr); err == nil {
+				logger.Info("finished backup", "Backup", backupName, "Address", addr)
+			} else {
+				logger.Error(err, "backup failed", "Backup", backupName, "Address", addr)
+			}
+			wg.Done()
+		}(svc)
 	}
-
-	podList := &corev1.PodList{}
-	if err = k8sClient.List(context.Background(), podList, client.InNamespace("medusa-operator")); err == nil {
-		log.Printf("found %d pods", len(podList.Items))
-	} else {
-		log.Printf("failed to list pods: %s\n", err)
-	}
-
-	log.Printf("starting backup")
-	if err = doBackup("test", "localhost"); err == nil {
-		log.Printf("backup complete")
-	} else {
-		log.Printf("backup failed: %s", err)
-	}
+	wg.Wait()
+	logger.Info("backups finished")
 }
 
-func doBackup(name, podIP string) error {
-	addr := fmt.Sprintf("%s:%d", podIP, backupSidecarPort)
+func getEnvVar(name string) string {
+	value := os.Getenv(name)
+	if len(value) == 0 {
+		log.Fatalf("the %s environment variable is required", name)
+	}
+	return value
+}
+
+func createK8sClient(namespace string) (client.Client, error) {
+	err := api.AddToScheme(scheme.Scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:             scheme.Scheme,
+		MetricsBindAddress: "0",  // no metrics... for now
+		Port:               9443,
+		LeaderElection:     false,
+		Namespace:          namespace, // namespaced-scope when the value is not an empty string
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return mgr.GetClient(), nil
+}
+
+func doBackup(ctx context.Context, name, addr string) error {
 	if medusaClient, err := medusa.NewClient(addr); err != nil {
 		return err
 	} else {
 		defer medusaClient.Close()
-		return medusaClient.CreateBackup(context.Background(), name)
+		return medusaClient.CreateBackup(ctx, name)
 	}
 }
 
