@@ -140,7 +140,7 @@ backup-client-build:
 PHONY: backup-client-docker-build
 backup-client-docker-build:
 	@echo Building ${BACKUP_CLIENT_REV_IMAGE}
-	docker build . -t ${BACKUP_CLIENT_REV_IMAGE}
+	docker build . -t ${BACKUP_CLIENT_REV_IMAGE} -f backup-client/Dockerfile
 	docker tag ${BACKUP_CLIENT_REV_IMAGE} ${BACKUP_CLIENT_LATEST_IMAGE}
 
 PHONY: backup-client-docker-push
