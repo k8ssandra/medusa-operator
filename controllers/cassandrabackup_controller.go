@@ -36,7 +36,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const(
+const (
 	backupSidecarPort = 50051
 	backupSidecarName = "medusa"
 )
@@ -152,7 +152,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Context, cassdc *cassdcapi.CassandraDatacenter) ([]corev1.Pod, error) {
 	cassdcSvc := &corev1.Service{}
-	err := r.Get(ctx, types.NamespacedName{Namespace: cassdc.Namespace,  Name: cassdc.GetAllPodsServiceName()}, cassdcSvc)
+	err := r.Get(ctx, types.NamespacedName{Namespace: cassdc.Namespace, Name: cassdc.GetAllPodsServiceName()}, cassdcSvc)
 	if err != nil {
 		return nil, err
 	}

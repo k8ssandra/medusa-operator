@@ -28,9 +28,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
+
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/k8ssandra/medusa-operator/controllers"
-	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -85,6 +86,14 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CassandraBackup")
+		os.Exit(1)
+	}
+	if err = (&controllers.CassandraRestoreReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("CassandraRestore"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "CassandraRestore")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

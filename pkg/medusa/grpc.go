@@ -50,5 +50,3 @@ func (c *Client) DeleteBackup(ctx context.Context, name string) error {
 	_, err := c.grpcClient.DeleteBackup(context.Background(), &request)
 	return err
 }
-
-

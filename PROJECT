@@ -6,6 +6,9 @@ resources:
 - group: cassandra
   kind: CassandraBackup
   version: v1alpha1
+- group: cassandra
+  kind: CassandraRestore
+  version: v1alpha1
 version: 3-alpha
 plugins:
   go.sdk.operatorframework.io/v2-alpha: {}
