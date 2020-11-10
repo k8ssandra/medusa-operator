@@ -8,6 +8,15 @@ metadata:
   namespace: medusa-operator
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - batch
   resources:
   - jobs
