@@ -35,8 +35,15 @@ type CassandraBackupSpec struct {
 
 // CassandraBackupStatus defines the observed state of CassandraBackup
 type CassandraBackupStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	StartTime metav1.Time `json:"startTime,omitempty"`
+
+	FinishTime metav1.Time `json:"finishTime,omitempty"`
+
+	InProgress []string `json:"inProgress,omitempty"`
+
+	Finished []string `json:"finished,omitempty"`
+
+	Failed []string `json:"failed,omitempty"`
 }
 
 // +kubebuilder:object:root=true

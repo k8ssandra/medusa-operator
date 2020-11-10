@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/k8ssandra/medusa-operator/pkg/medusa"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
+	operrors "github.com/k8ssandra/medusa-operator/pkg/errors"
 	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	v1batch "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -69,10 +71,37 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 	backup := instance.DeepCopy()
 
+	if backupFinished(backup) {
+		return ctrl.Result{Requeue: false}, nil
+	}
+
+	// First check to see if the backup is already in progress
+	if !backup.Status.StartTime.IsZero() {
+		// If there is anything in progress, simply requeue the request
+		if len(backup.Status.InProgress) > 0 {
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+
+		r.Log.Info("backup complete")
+
+		// Set the finish time
+		// Note that the time here is not accurate, but that is ok. For now we are just
+		// using it as a completion marker.
+		patch := client.MergeFrom(backup.DeepCopy())
+		backup.Status.FinishTime = metav1.Now()
+		if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+			r.Log.Error(err, "failed to patch status with finish time")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+		}
+
+		return ctrl.Result{Requeue: false}, nil
+	}
+
+	cassdcKey := types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.CassandraDatacenter}
 	cassdc := &cassdcapi.CassandraDatacenter{}
-	err = r.Get(ctx, types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.CassandraDatacenter}, cassdc)
+	err = r.Get(ctx, cassdcKey, cassdc)
 	if err != nil {
-		r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", backup.Spec.CassandraDatacenter)
+		r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
@@ -81,31 +110,46 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
-	grpcServices, err := getGrpcServiceAddresses(&pods)
-	if err != nil {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+	// Make sure that Medusa is deployed
+	if !isMedusaDeployed(pods) {
+		r.Log.Error(operrors.BackupSidecarNotFound, "medusa is not deployed", "CassandraDatacenter", cassdcKey)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, operrors.BackupSidecarNotFound
 	}
 
-
-
-	backupJob := &v1batch.Job{}
-	if err = r.Client.Get(ctx, req.NamespacedName, backupJob); err == nil {
-		// The job has already been created, so we are done.
-		return ctrl.Result{}, nil
-	} else if errors.IsNotFound(err) {
-		backupJob = newBackupJob(backup, grpcServices)
-		r.Log.Info("creating backup job", "jobName", backupJob.Name)
-		if err = r.Client.Create(ctx, backupJob); err == nil {
-			// The job was created. We are done.
-			return ctrl.Result{}, nil
-		} else {
-			r.Log.Error(err, "failed to create backup job", "jobName", backupJob.Name)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		}
-	} else {
-		r.Log.Error(err, "failed to get cassandrabackup")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+	patch := client.MergeFrom(backup.DeepCopy())
+	backup.Status.StartTime = metav1.Now()
+	for _, pod := range pods {
+		backup.Status.InProgress = append(backup.Status.InProgress, pod.Name)
 	}
+	if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+		r.Log.Error(err, "failed to patch status with backup start time", "Backup", backup)
+		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, err
+	}
+
+	for _, p := range pods {
+		go func(pod corev1.Pod) {
+			r.Log.Info("starting backup", "CassandraPod", pod.Name)
+			succeeded := false
+			if err := doBackup(ctx, backup.Spec.Name, &pod); err == nil {
+				r.Log.Info("finished backup", "CassandraPod", pod.Name)
+				succeeded = true
+			} else {
+				r.Log.Error(err, "backup failed", "CassandraPod", pod.Name)
+			}
+			patch := client.MergeFrom(backup.DeepCopy())
+			backup.Status.InProgress = removeValue(backup.Status.InProgress, pod.Name)
+			if succeeded {
+				backup.Status.Finished = append(backup.Status.Finished, pod.Name)
+			} else {
+				backup.Status.Failed = append(backup.Status.Failed, pod.Name)
+			}
+			if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+				r.Log.Error(err, "failed to patch status", "Backup", backup)
+			}
+		}(p)
+	}
+
+	return ctrl.Result{}, nil
 }
 
 func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Context, cassdc *cassdcapi.CassandraDatacenter) ([]corev1.Pod, error) {
@@ -150,6 +194,15 @@ func getGrpcServiceAddresses(pods *[]corev1.Pod) ([]string, error) {
 	return addresses, nil
 }
 
+func isMedusaDeployed(pods []corev1.Pod) bool {
+	for _, pod := range pods {
+		if !hasMedusaSidecar(&pod) {
+			return false
+		}
+	}
+	return true
+}
+
 func hasMedusaSidecar(pod *corev1.Pod) bool {
 	for _, container := range pod.Spec.Containers {
 		if container.Name == backupSidecarName {
@@ -157,6 +210,20 @@ func hasMedusaSidecar(pod *corev1.Pod) bool {
 		}
 	}
 	return false
+}
+
+func doBackup(ctx context.Context, name string, pod *corev1.Pod) error {
+	addr := fmt.Sprintf("%s:%d", pod.Status.PodIP, backupSidecarPort)
+	if medusaClient, err := medusa.NewClient(addr); err != nil {
+		return err
+	} else {
+		defer medusaClient.Close()
+		return medusaClient.CreateBackup(ctx, name)
+	}
+}
+
+func backupFinished(backup *api.CassandraBackup) bool {
+	return !backup.Status.FinishTime.IsZero()
 }
 
 func newBackupJob(backup *api.CassandraBackup, medusaServices []string) *v1batch.Job {
@@ -195,6 +262,16 @@ func newBackupJob(backup *api.CassandraBackup, medusaServices []string) *v1batch
 			},
 		},
 	}
+}
+
+func removeValue(slice []string, value string) []string {
+	newSlice := make([]string, 0)
+	for _, s := range slice {
+		if s != value {
+			newSlice = append(newSlice, s)
+		}
+	}
+	return newSlice
 }
 
 func (r *CassandraBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {

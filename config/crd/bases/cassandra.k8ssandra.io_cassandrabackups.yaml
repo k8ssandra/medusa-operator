@@ -48,6 +48,25 @@ spec:
           type: object
         status:
           description: CassandraBackupStatus defines the observed state of CassandraBackup
+          properties:
+            failed:
+              items:
+                type: string
+              type: array
+            finishTime:
+              format: date-time
+              type: string
+            finished:
+              items:
+                type: string
+              type: array
+            inProgress:
+              items:
+                type: string
+              type: array
+            startTime:
+              format: date-time
+              type: string
           type: object
       type: object
   version: v1alpha1
