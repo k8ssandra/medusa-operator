@@ -17,19 +17,11 @@ rules:
   - list
   - watch
 - apiGroups:
-  - batch
-  resources:
-  - jobs
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-- apiGroups:
   - cassandra.datastax.com
   resources:
   - cassandradatacenters
   verbs:
+  - create
   - get
   - list
   - watch
@@ -53,6 +45,14 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - cassandra.k8ssandra.io
+  resources:
+  - cassandrarebackups
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - cassandra.k8ssandra.io
   resources:

@@ -51,7 +51,6 @@ type CassandraBackupReconciler struct {
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrabackups,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrabackups/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cassandra.datastax.com,namespace="medusa-operator",resources=cassandradatacenters,verbs=get;list;watch
-// +kubebuilder:rbac:groups="batch",namespace="medusa-operator",resources=jobs,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",namespace="medusa-operator",resources=pods;services,verbs=get;list;watch
 
 func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
