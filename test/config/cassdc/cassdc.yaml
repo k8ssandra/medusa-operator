@@ -84,6 +84,8 @@ spec:
               subPath: medusa.ini
             - name: cassandra-config
               mountPath: /etc/cassandra
+            - mountPath: /var/lib/cassandra
+              name: server-data
       volumes:
         - name: medusa-gcp-key
           secret:
