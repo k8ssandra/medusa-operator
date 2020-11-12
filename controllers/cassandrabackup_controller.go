@@ -175,11 +175,7 @@ func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, b
 			ServerVersion: cassdc.Spec.ServerVersion,
 			ServerType: cassdc.Spec.ServerType,
 			ServerImage: cassdc.Spec.ServerImage,
-
-			// Temporarily commenting out settning the Config property. It results in an
-			// error with this message: Invalid value: \"\": status.cassdcTemplateSpec.spec.config in body must be of type byte
-			//Config: []byte(cassdc.Spec.Config),
-
+			Config: cassdc.Spec.Config,
 			ManagementApiAuth: cassdc.Spec.ManagementApiAuth,
 			Resources: cassdc.Spec.Resources,
 			SystemLoggerResources: cassdc.Spec.SystemLoggerResources,

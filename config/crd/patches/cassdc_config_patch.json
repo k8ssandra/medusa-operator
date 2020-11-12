@@ -1,0 +1,6 @@
+[
+  {
+    "op": "remove",
+    "path": "/spec/validation/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/config"
+  }
+]
