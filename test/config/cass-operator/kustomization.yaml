@@ -8,4 +8,5 @@ images:
   # volume mounts. See https://k8ssandra.atlassian.net/browse/K8C-89 for details.
   - name: datastax/cass-operator
     newName: jsanda/cass-operator
-    newTag: k8c-89
+    # latest: digest: sha256:c514df22aed1594fc0895f96f90dc31999da434dfa4ac1aa455b1bef6d3a01ce
+    newTag: latest
