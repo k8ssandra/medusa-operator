@@ -48,7 +48,7 @@ spec:
             - name: medusa-config
               mountPath: /etc/medusa/medusa.ini
               subPath: medusa.ini
-            - name: cassandra-config
+            - name: server-config
               mountPath: /etc/cassandra
             - mountPath: /var/lib/cassandra
               name: server-data
