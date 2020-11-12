@@ -67,7 +67,44 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 	// See if the restore is already in progress
 	if !restore.Status.StartTime.IsZero() {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		cassdcKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.CassandraDatacenter.Name}
+		cassdc := &cassdcapi.CassandraDatacenter{}
+
+		if err = r.Get(ctx, cassdcKey, cassdc); err != nil {
+			// TODO add some additional logging and/or generate an event if the error is not found
+			if errors.IsNotFound(err) {
+				r.Log.Error(err, "cassandradatacenter not found", "CassandraDatacenter", cassdcKey)
+
+				patch := client.MergeFrom(restore.DeepCopy())
+				restore.Status.FinishTime = metav1.Now()
+				if  err = r.Status().Patch(ctx, restore, patch); err == nil {
+					return ctrl.Result{Requeue: false}, err
+				} else {
+					r.Log.Error(err, "failed to patch status with end time")
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+				}
+			} else {
+				r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+			}
+		}
+
+		if isCassdcReady(cassdc) {
+			r.Log.Info("the cassandradatacenter has been restored and is ready", "CassandraDatacenter", cassdcKey)
+
+			patch := client.MergeFrom(restore.DeepCopy())
+			restore.Status.FinishTime = metav1.Now()
+			if  err = r.Status().Patch(ctx, restore, patch); err == nil {
+				return ctrl.Result{Requeue: false}, err
+			} else {
+				r.Log.Error(err, "failed to patch status with end time")
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+			}
+		}
+
+		// TODO handle scenarios in which the CassandraDatacenter fails to become ready
+
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	backupKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.Backup}
@@ -78,15 +115,6 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		r.Log.Error(err, "failed to get backup", "CassandraBackup", backupKey)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
-
-	//cassdcKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.CassandraDatacenter.Name}
-	//cassdc := &cassdcapi.CassandraDatacenter{}
-	//
-	//if err = r.Get(ctx, cassdcKey, cassdc); err != nil {
-	//	// TODO add some additional logging and/or generate an event if the error is not found
-	//	r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
-	//	return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-	//}
 
 	newCassdc, err := buildNewCassandraDatacenter(restore, backup)
 	if err != nil {
@@ -103,7 +131,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		restore.Status.StartTime = metav1.Now()
 		if err = r.Status().Patch(ctx, restore, patch); err != nil {
 			r.Log.Error(err, "fail to patch status with start time")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
 		} else {
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
@@ -145,6 +173,14 @@ func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, e
 	}
 
 	return 0, fmt.Errorf("restore initContainer (%s) not found")
+}
+
+func isCassdcReady(cassdc *cassdcapi.CassandraDatacenter) bool {
+	if cassdc.Status.CassandraOperatorProgress != cassdcapi.ProgressReady {
+		return false
+	}
+	status := cassdc.GetConditionStatus(cassdcapi.DatacenterReady)
+	return status == corev1.ConditionTrue
 }
 
 func (r *CassandraRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
