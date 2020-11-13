@@ -1,0 +1,7 @@
+namespace: medusa-dev
+
+resources:
+- ../../../../config/crd
+- ../../../../config/rbac
+- ../../../../config/manager
+- ../../cass-operator

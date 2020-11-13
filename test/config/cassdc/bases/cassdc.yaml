@@ -43,8 +43,8 @@ spec:
             - name: MEDUSA_MODE
               value: RESTORE
           volumeMounts:
-            - name: medusa-gcp-key
-              mountPath: /etc/medusa-secrets
+#            - name: medusa-gcp-key
+#              mountPath: /etc/medusa-secrets
             - name: medusa-config
               mountPath: /etc/medusa/medusa.ini
               subPath: medusa.ini
@@ -77,8 +77,8 @@ spec:
               command: [ "/bin/grpc_health_probe", "-addr=:50051" ]
             initialDelaySeconds: 10
           volumeMounts:
-            - name: medusa-gcp-key
-              mountPath: /etc/medusa-secrets
+#            - name: medusa-gcp-key
+#              mountPath: /etc/medusa-secrets
             - name: medusa-config
               mountPath: /etc/medusa/medusa.ini
               subPath: medusa.ini
@@ -87,9 +87,9 @@ spec:
             - mountPath: /var/lib/cassandra
               name: server-data
       volumes:
-        - name: medusa-gcp-key
-          secret:
-            secretName: medusa-gcp-key
+#        - name: medusa-gcp-key
+#          secret:
+#            secretName: medusa-gcp-key
         - name: medusa-config
           configMap:
             name: medusa-config
