@@ -2,11 +2,9 @@ resources:
 - cass-operator.yaml
 
 images:
-  # Until cass-operator 1.5 is released, we need to use a more recent image than 1.4.1 in
-  # order to get the merge functionality for containers specified in
-  # CassandraDatacenter.Spec.PodTemplateSpec. We also need a patch for a bug involving
-  # volume mounts. See https://k8ssandra.atlassian.net/browse/K8C-89 for details.
+  # We need to use a patched version of cass-operator for now that has changes needed in
+  # for Reaper and Medusa integration. Images will be built from
+  # https://github.com/jsanda/cass-operator/tree/k8ssandra.
   - name: datastax/cass-operator
     newName: jsanda/cass-operator
-    # latest: digest: sha256:c514df22aed1594fc0895f96f90dc31999da434dfa4ac1aa455b1bef6d3a01ce
-    newTag: latest
+    newTag: 91205f4d8f1e
