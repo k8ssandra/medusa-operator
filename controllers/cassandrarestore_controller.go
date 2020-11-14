@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/docker/distribution/uuid"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -33,6 +32,7 @@ import (
 
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
+	"github.com/google/uuid"
 )
 
 const (
@@ -148,6 +148,13 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
 
+		patch := client.MergeFrom(restore.DeepCopy())
+		restore.Status.StartTime = metav1.Now()
+		if err = r.Status().Patch(ctx, restore, patch); err != nil {
+			r.Log.Error(err, "fail to patch status with start time")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+		}
+
 		if err = r.Update(ctx, cassdc); err == nil {
 			r.Log.Info("the cassandradatacenter has been updated and will be restarted", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
@@ -185,7 +192,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 }
 
 func (r *CassandraRestoreReconciler) setRestoreKey(ctx context.Context, restore *api.CassandraRestore) error {
-	key := uuid.Generate()
+	key := uuid.New()
 	patch := client.MergeFrom(restore.DeepCopy())
 	restore.Status.RestoreKey = key.String()
 
@@ -201,15 +208,6 @@ func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.Cass
 		Spec: backup.Status.CassdcTemplateSpec.Spec,
 	}
 
-	//index, err := getRestoreInitContainerIndex(newCassdc)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//restoreContainer := &newCassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
-	//envVars := restoreContainer.Env
-	//envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backup.Name})
-	//restoreContainer.Env = envVars
 	if err := setBackupNameInRestoreContainer(backup.Spec.Name, newCassdc); err != nil {
 		return nil, err
 	}
