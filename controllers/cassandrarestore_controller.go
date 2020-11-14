@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/docker/distribution/uuid"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -64,6 +65,13 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 	}
 
 	restore := instance.DeepCopy()
+
+	if len(restore.Status.RestoreKey) == 0 {
+		if err = r.setRestoreKey(ctx, restore); err != nil {
+			r.Log.Error(err, "failed to set restore key")
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+	}
 
 	// See if the restore is already in progress
 	if !restore.Status.StartTime.IsZero() {
@@ -116,6 +124,41 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
+	if restore.Spec.InPlace {
+		r.Log.Info("performing in place restore")
+
+		cassdcKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.CassandraDatacenter.Name}
+		cassdc := &cassdcapi.CassandraDatacenter{}
+
+		if err = r.Get(ctx, cassdcKey, cassdc); err != nil {
+			r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
+		cassdc = cassdc.DeepCopy()
+
+		cassdc.Spec.RollingRestartRequested = true
+		if err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
+			r.Log.Error(err, "failed to set backup name in restore container", "CassandraDatacenter", cassdcKey)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
+		if err = setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, cassdc); err != nil {
+			r.Log.Error(err, "failed to set restore key in restore container", "CassandraDatacenter", cassdcKey)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
+		if err = r.Update(ctx, cassdc); err == nil {
+			r.Log.Info("the cassandradatacenter has been updated and will be restarted", "CassandraDatacenter", cassdcKey)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		} else {
+			r.Log.Error(err, "failed to update the cassandradatacenter", "CassandraDatacenter", cassdcKey)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+	}
+
+	r.Log.Info("restoring to new cassandradatacenter")
+
 	newCassdc, err := buildNewCassandraDatacenter(restore, backup)
 	if err != nil {
 		r.Log.Error(err, "failed to build new cassandradatacenter")
@@ -141,6 +184,14 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 	}
 }
 
+func (r *CassandraRestoreReconciler) setRestoreKey(ctx context.Context, restore *api.CassandraRestore) error {
+	key := uuid.Generate()
+	patch := client.MergeFrom(restore.DeepCopy())
+	restore.Status.RestoreKey = key.String()
+
+	return r.Status().Patch(ctx, restore, patch)
+}
+
 func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.CassandraBackup) (*cassdcapi.CassandraDatacenter, error) {
 	newCassdc := &cassdcapi.CassandraDatacenter{
 		ObjectMeta: metav1.ObjectMeta{
@@ -150,17 +201,64 @@ func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.Cass
 		Spec: backup.Status.CassdcTemplateSpec.Spec,
 	}
 
-	index, err := getRestoreInitContainerIndex(newCassdc)
-	if err != nil {
+	//index, err := getRestoreInitContainerIndex(newCassdc)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//restoreContainer := &newCassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
+	//envVars := restoreContainer.Env
+	//envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backup.Name})
+	//restoreContainer.Env = envVars
+	if err := setBackupNameInRestoreContainer(backup.Spec.Name, newCassdc); err != nil {
 		return nil, err
 	}
 
-	restoreContainer := &newCassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
-	envVars := restoreContainer.Env
-	envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backup.Name})
-	restoreContainer.Env = envVars
+	if err := setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, newCassdc); err != nil {
+		return nil, err
+	}
 
 	return newCassdc, nil
+}
+
+func setBackupNameInRestoreContainer(backupName string, cassdc *cassdcapi.CassandraDatacenter) error {
+	index, err := getRestoreInitContainerIndex(cassdc)
+	if err != nil {
+		return err
+	}
+
+	restoreContainer := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
+	envVars := restoreContainer.Env
+	envVarIdx := getEnvVarIndex("BACKUP_NAME", envVars)
+
+	if envVarIdx > -1 {
+		envVars[envVarIdx].Value = backupName
+	} else {
+		envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backupName})
+	}
+	restoreContainer.Env = envVars
+
+	return nil
+}
+
+func setRestoreKeyInRestoreContainer(restoreKey string, cassdc *cassdcapi.CassandraDatacenter) error {
+	index, err := getRestoreInitContainerIndex(cassdc)
+	if err != nil {
+		return err
+	}
+
+	restoreContainer := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
+	envVars := restoreContainer.Env
+	envVarIdx := getEnvVarIndex("RESTORE_KEY", envVars)
+
+	if envVarIdx > -1 {
+		envVars[envVarIdx].Value = restoreKey
+	} else {
+		envVars = append(envVars, corev1.EnvVar{Name: "RESTORE_KEY", Value: restoreKey})
+	}
+	restoreContainer.Env = envVars
+
+	return nil
 }
 
 func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, error) {
@@ -173,6 +271,15 @@ func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, e
 	}
 
 	return 0, fmt.Errorf("restore initContainer (%s) not found")
+}
+
+func getEnvVarIndex(name string, envVars []corev1.EnvVar) int {
+	for i, envVar := range envVars {
+		if envVar.Name == name {
+			return i
+		}
+	}
+	return -1
 }
 
 func isCassdcReady(cassdc *cassdcapi.CassandraDatacenter) bool {
