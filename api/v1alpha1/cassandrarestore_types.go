@@ -33,15 +33,21 @@ type CassandraDatacenterConfig struct {
 
 // CassandraRestoreSpec defines the desired state of CassandraRestore
 type CassandraRestoreSpec struct {
-
 	// The name of the CassandraBackup to restore
 	Backup string `json:"backup"`
+
+	// When true the restore will be performed on the source cluster from which the backup
+	// was taken. There will be a rolling restart of the source cluster.
+	InPlace bool `json:"inPlace,omitEmpty"`
 
 	CassandraDatacenter CassandraDatacenterConfig `json:"cassandraDatacenter"`
 }
 
 // CassandraRestoreStatus defines the observed state of CassandraRestore
 type CassandraRestoreStatus struct {
+	// A unique key that identifies the restore operation.
+	RestoreKey string `json:"restoreKey"`
+
 	StartTime metav1.Time `json:"startTime,omitempty"`
 
 	FinishTime metav1.Time `json:"finishTime,omitempty"`

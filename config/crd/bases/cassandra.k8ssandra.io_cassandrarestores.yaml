@@ -51,9 +51,15 @@ spec:
               - clusterName
               - name
               type: object
+            inPlace:
+              description: When true the restore will be performed on the source cluster
+                from which the backup was taken. There will be a rolling restart of
+                the source cluster.
+              type: boolean
           required:
           - backup
           - cassandraDatacenter
+          - inPlace
           type: object
         status:
           description: CassandraRestoreStatus defines the observed state of CassandraRestore
@@ -73,9 +79,14 @@ spec:
               items:
                 type: string
               type: array
+            restoreKey:
+              description: A unique key that identifies the restore operation.
+              type: string
             startTime:
               format: date-time
               type: string
+          required:
+          - restoreKey
           type: object
       type: object
   version: v1alpha1
