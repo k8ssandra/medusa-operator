@@ -1,0 +1,1 @@
+medusa-operator is Kubernetes operator that provides backup/restore capabilities for Cassandra using [medusa](https://github.com/thelastpickle/cassandra-medusa). The operator works directly with the `CassandraDatacenter` custom resource provided by [cass-operator](https://github.com/datastax/cass-operator).
