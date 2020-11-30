@@ -3,5 +3,5 @@ resources:
 
 images:
 - name: controller
-  newName: docker.io/jsanda/medusa-operator
+  newName: docker.io/k8ssandra/medusa-operator
   newTag: latest

@@ -137,7 +137,6 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 		cassdc = cassdc.DeepCopy()
 
-		cassdc.Spec.RollingRestartRequested = true
 		if err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
 			r.Log.Error(err, "failed to set backup name in restore container", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
