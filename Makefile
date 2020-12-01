@@ -12,7 +12,7 @@ endif
 BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 
 # TODO Change ORG to k8ssandra when able to
-ORG?=jsanda
+ORG?=k8ssandra
 PROJECT=medusa-operator
 REG=docker.io
 
