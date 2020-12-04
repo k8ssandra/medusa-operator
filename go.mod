@@ -7,7 +7,7 @@ require (
 	github.com/datastax/cass-operator v1.4.1
 	github.com/go-logr/logr v0.1.0
 	github.com/golang/protobuf v1.4.2
-	github.com/google/uuid v1.1.2 // indirect
+	github.com/google/uuid v1.1.2
 	github.com/onsi/ginkgo v1.12.1
 	github.com/onsi/gomega v1.10.1
 	google.golang.org/grpc v1.31.1
@@ -40,5 +40,5 @@ replace (
 	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.18.6
 	k8s.io/metrics => k8s.io/metrics v0.18.6
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.18.6
-
+	github.com/datastax/cass-operator => github.com/jsanda/cass-operator v1.0.1-0.20201111154347-91205f4d8f1e
 )

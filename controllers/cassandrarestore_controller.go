@@ -30,9 +30,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	"github.com/google/uuid"
+	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 )
 
 const (
@@ -85,7 +85,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 				patch := client.MergeFrom(restore.DeepCopy())
 				restore.Status.FinishTime = metav1.Now()
-				if  err = r.Status().Patch(ctx, restore, patch); err == nil {
+				if err = r.Status().Patch(ctx, restore, patch); err == nil {
 					return ctrl.Result{Requeue: false}, err
 				} else {
 					r.Log.Error(err, "failed to patch status with end time")
@@ -102,7 +102,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 			patch := client.MergeFrom(restore.DeepCopy())
 			restore.Status.FinishTime = metav1.Now()
-			if  err = r.Status().Patch(ctx, restore, patch); err == nil {
+			if err = r.Status().Patch(ctx, restore, patch); err == nil {
 				return ctrl.Result{Requeue: false}, err
 			} else {
 				r.Log.Error(err, "failed to patch status with end time")
@@ -202,7 +202,7 @@ func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.Cass
 	newCassdc := &cassdcapi.CassandraDatacenter{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: backup.Namespace,
-			Name: restore.Spec.CassandraDatacenter.Name,
+			Name:      restore.Spec.CassandraDatacenter.Name,
 		},
 		Spec: backup.Status.CassdcTemplateSpec.Spec,
 	}
@@ -267,7 +267,7 @@ func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, e
 		}
 	}
 
-	return 0, fmt.Errorf("restore initContainer (%s) not found")
+	return 0, fmt.Errorf("restore initContainer (%s) not found", restoreContainerName)
 }
 
 func getEnvVarIndex(name string, envVars []corev1.EnvVar) int {

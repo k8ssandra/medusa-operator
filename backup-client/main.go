@@ -88,7 +88,7 @@ func createK8sClient(namespace string) (client.Client, error) {
 
 	mgr, err = ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:             scheme.Scheme,
-		MetricsBindAddress: "0",  // no metrics... for now
+		MetricsBindAddress: "0", // no metrics... for now
 		Port:               9443,
 		LeaderElection:     false,
 		Namespace:          namespace, // namespaced-scope when the value is not an empty string
@@ -108,4 +108,3 @@ func doBackup(ctx context.Context, name, addr string) error {
 		return medusaClient.CreateBackup(ctx, name)
 	}
 }
-
