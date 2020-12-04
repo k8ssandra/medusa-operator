@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"strconv"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -17,9 +18,11 @@ import (
 
 const (
 	TestCassandraDatacenterName = "dc1"
+	timeout                     = time.Second * 10
+	interval                    = time.Millisecond * 250
 )
 
-var _ = Describe("Reaper controller", func() {
+var _ = Describe("CassandraBackup controller", func() {
 	i := 0
 	testNamespace := ""
 
@@ -57,6 +60,34 @@ var _ = Describe("Reaper controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), cassdc)).Should(Succeed())
+		Eventually(func() bool {
+			created := &cassdcapi.CassandraDatacenter{}
+			err := k8sClient.Get(context.Background(), cassdcKey, created)
+			return err == nil
+		}, timeout, interval).Should(BeTrue())
+
+		By("create the datacenter service")
+		dcServiceKey := types.NamespacedName{Namespace: cassdcKey.Namespace, Name: cassdc.GetDatacenterServiceName()}
+		dcService := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: dcServiceKey.Namespace,
+				Name:      dcServiceKey.Name,
+			},
+			Spec: corev1.ServiceSpec{
+				Ports: []corev1.ServicePort{
+					{
+						Name: "cql",
+						Port: 9042,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(context.Background(), dcService)).Should(Succeed())
+		Eventually(func() bool {
+			created := &corev1.Service{}
+			err := k8sClient.Get(context.Background(), dcServiceKey, created)
+			return err == nil
+		}, timeout, interval).Should(BeTrue())
 
 		By("make the CassandraDatacenter ready")
 		patch := client.MergeFrom(cassdc.DeepCopy())
@@ -68,12 +99,18 @@ var _ = Describe("Reaper controller", func() {
 			},
 		}
 		Expect(k8sClient.Status().Patch(context.Background(), cassdc, patch)).Should(Succeed())
-
-		updatedDc := &cassdcapi.CassandraDatacenter{}
-		Expect(k8sClient.Get(context.Background(), cassdcKey, updatedDc)).To(Succeed())
-		Expect(updatedDc.Status.CassandraOperatorProgress).To(Equal(cassdcapi.ProgressReady))
+		Eventually(func() bool {
+			updated := &cassdcapi.CassandraDatacenter{}
+			err := k8sClient.Get(context.Background(), cassdcKey, updated)
+			if err != nil {
+				return false
+			}
+			return cassdc.Status.CassandraOperatorProgress == cassdcapi.ProgressReady &&
+				updated.GetConditionStatus(cassdcapi.DatacenterReady) == corev1.ConditionTrue
+		}, timeout, interval).Should(BeTrue())
 
 		By("create a CassandraBackup")
+		backupKey := types.NamespacedName{Namespace: testNamespace, Name: backupName}
 		backup := &api.CassandraBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: testNamespace,
@@ -85,5 +122,11 @@ var _ = Describe("Reaper controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), backup)).Should(Succeed())
+		Eventually(func() bool {
+			created := &api.CassandraBackup{}
+			err := k8sClient.Get(context.Background(), backupKey, created)
+			return err == nil
+		}, timeout, interval).Should(BeTrue())
+
 	})
 })
