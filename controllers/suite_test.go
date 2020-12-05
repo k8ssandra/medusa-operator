@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/k8ssandra/medusa-operator/pkg/medusa"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -84,9 +85,10 @@ var _ = BeforeSuite(func(done Done) {
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&CassandraBackupReconciler{
-		Client: k8sManager.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("CassandraBackup"),
-		Scheme: scheme.Scheme,
+		Client:        k8sManager.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("CassandraBackup"),
+		Scheme:        scheme.Scheme,
+		ClientFactory: &medusa.DefaultFactory{},
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/k8ssandra/medusa-operator/pkg/medusa"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -81,9 +82,10 @@ func main() {
 	}
 
 	if err = (&controllers.CassandraBackupReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("CassandraBackup"),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Log:           ctrl.Log.WithName("controllers").WithName("CassandraBackup"),
+		Scheme:        mgr.GetScheme(),
+		ClientFactory: &medusa.DefaultFactory{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CassandraBackup")
 		os.Exit(1)

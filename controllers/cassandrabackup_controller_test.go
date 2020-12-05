@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -57,6 +58,11 @@ var _ = Describe("CassandraBackup controller", func() {
 				ServerType:    "cassandra",
 				ServerVersion: "3.11.7",
 				Size:          3,
+				StorageConfig: cassdcapi.StorageConfig{
+					CassandraDataVolumeClaimSpec: &corev1.PersistentVolumeClaimSpec{
+						VolumeName: "data",
+					},
+				},
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), cassdc)).Should(Succeed())
@@ -67,13 +73,16 @@ var _ = Describe("CassandraBackup controller", func() {
 		}, timeout, interval).Should(BeTrue())
 
 		By("create the datacenter service")
-		dcServiceKey := types.NamespacedName{Namespace: cassdcKey.Namespace, Name: cassdc.GetDatacenterServiceName()}
+		dcServiceKey := types.NamespacedName{Namespace: cassdcKey.Namespace, Name: cassdc.GetAllPodsServiceName()}
 		dcService := &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: dcServiceKey.Namespace,
 				Name:      dcServiceKey.Name,
 			},
 			Spec: corev1.ServiceSpec{
+				Selector: map[string]string{
+					cassdcapi.ClusterLabel: cassdc.Spec.ClusterName,
+				},
 				Ports: []corev1.ServicePort{
 					{
 						Name: "cql",
@@ -88,6 +97,9 @@ var _ = Describe("CassandraBackup controller", func() {
 			err := k8sClient.Get(context.Background(), dcServiceKey, created)
 			return err == nil
 		}, timeout, interval).Should(BeTrue())
+
+		By("create the CassandraDatacenter pods")
+		createCassandraDatacenterPods(cassdc)
 
 		By("make the CassandraDatacenter ready")
 		patch := client.MergeFrom(cassdc.DeepCopy())
@@ -118,7 +130,7 @@ var _ = Describe("CassandraBackup controller", func() {
 			},
 			Spec: api.CassandraBackupSpec{
 				Name:                backupName,
-				CassandraDatacenter: cassdcKey.String(),
+				CassandraDatacenter: cassdcKey.Name,
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), backup)).Should(Succeed())
@@ -128,5 +140,46 @@ var _ = Describe("CassandraBackup controller", func() {
 			return err == nil
 		}, timeout, interval).Should(BeTrue())
 
+		By("check that the backups are started")
+		Eventually(func() bool {
+			updated := &api.CassandraBackup{}
+			err := k8sClient.Get(context.Background(), backupKey, updated)
+			if err != nil {
+				return false
+			}
+			return !updated.Status.StartTime.IsZero()
+		}, timeout, interval).Should(BeTrue())
 	})
 })
+
+func createCassandraDatacenterPods(cassdc *cassdcapi.CassandraDatacenter) {
+	for i := int32(0); i < cassdc.Spec.Size; i++ {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: cassdc.Namespace,
+				Name:      fmt.Sprintf("%s-%d", cassdc.Spec.ClusterName, i),
+				Labels: map[string]string{
+					cassdcapi.ClusterLabel: cassdc.Spec.ClusterName,
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "cassandra",
+						Image: "cassandra",
+					},
+					{
+						Name:  backupSidecarName,
+						Image: backupSidecarName,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(context.Background(), pod)).Should(Succeed())
+		Eventually(func() bool {
+			created := &corev1.Pod{}
+			err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, created)
+			return err == nil
+		}, timeout, interval).Should(BeTrue())
+	}
+}

@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
-	"github.com/k8ssandra/medusa-operator/pkg/medusa"
 	"k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -101,10 +100,6 @@ func createK8sClient(namespace string) (client.Client, error) {
 }
 
 func doBackup(ctx context.Context, name, addr string) error {
-	if medusaClient, err := medusa.NewClient(addr); err != nil {
-		return err
-	} else {
-		defer medusaClient.Close()
-		return medusaClient.CreateBackup(ctx, name)
-	}
+	//
+	return nil
 }
