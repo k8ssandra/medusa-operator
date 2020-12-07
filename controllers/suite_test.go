@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/k8ssandra/medusa-operator/pkg/medusa"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -43,6 +42,7 @@ import (
 var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
+var medusaClientFactory *fakeMedusaClientFactory
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -84,11 +84,13 @@ var _ = BeforeSuite(func(done Done) {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
+	medusaClientFactory = NewMedusaClientFactory()
+
 	err = (&CassandraBackupReconciler{
 		Client:        k8sManager.GetClient(),
 		Log:           ctrl.Log.WithName("controllers").WithName("CassandraBackup"),
 		Scheme:        scheme.Scheme,
-		ClientFactory: &medusa.DefaultFactory{},
+		ClientFactory: medusaClientFactory,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

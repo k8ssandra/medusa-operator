@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/k8ssandra/medusa-operator/pkg/medusa"
+	"github.com/k8ssandra/medusa-operator/pkg/pb"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -149,6 +151,13 @@ var _ = Describe("CassandraBackup controller", func() {
 			}
 			return !updated.Status.StartTime.IsZero()
 		}, timeout, interval).Should(BeTrue())
+
+		By("verify that medusa gRPC clients are invoked")
+		Expect(medusaClientFactory.GetRequestedBackups()).To(Equal(map[string][]string{
+			fmt.Sprintf("192.168.1.50:%d", backupSidecarPort): {backupName},
+			fmt.Sprintf("192.168.1.51:%d", backupSidecarPort): {backupName},
+			fmt.Sprintf("192.168.1.52:%d", backupSidecarPort): {backupName},
+		}))
 	})
 })
 
@@ -181,5 +190,60 @@ func createCassandraDatacenterPods(cassdc *cassdcapi.CassandraDatacenter) {
 			err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, created)
 			return err == nil
 		}, timeout, interval).Should(BeTrue())
+
+		patch := client.MergeFrom(pod.DeepCopy())
+		pod.Status.PodIP = "192.168.1." + strconv.Itoa(50+int(i))
+		Expect(k8sClient.Status().Patch(context.Background(), pod, patch)).Should(Succeed())
+		Eventually(func() bool {
+			updated := &corev1.Pod{}
+			err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, updated)
+			if err != nil {
+				return false
+			}
+			return len(updated.Status.PodIP) > 0
+		}, timeout, interval).Should(BeTrue())
 	}
+}
+
+type fakeMedusaClientFactory struct {
+	clients map[string]*fakeMedusaClient
+}
+
+func NewMedusaClientFactory() *fakeMedusaClientFactory {
+	return &fakeMedusaClientFactory{clients: make(map[string]*fakeMedusaClient, 0)}
+}
+
+func (f *fakeMedusaClientFactory) NewClient(address string) (medusa.Client, error) {
+	medusaClient := newFakeMedusaClient()
+	f.clients[address] = medusaClient
+	return medusaClient, nil
+}
+
+func (f *fakeMedusaClientFactory) GetRequestedBackups() map[string][]string {
+	requestedBackups := make(map[string][]string)
+	for k, v := range f.clients {
+		requestedBackups[k] = v.RequestedBackups
+	}
+	return requestedBackups
+}
+
+type fakeMedusaClient struct {
+	RequestedBackups []string
+}
+
+func newFakeMedusaClient() *fakeMedusaClient {
+	return &fakeMedusaClient{RequestedBackups: make([]string, 0)}
+}
+
+func (c *fakeMedusaClient) Close() error {
+	return nil
+}
+
+func (c *fakeMedusaClient) CreateBackup(ctx context.Context, name string) error {
+	c.RequestedBackups = append(c.RequestedBackups, name)
+	return nil
+}
+
+func (c *fakeMedusaClient) GetBackups(ctx context.Context) ([]*pb.BackupSummary, error) {
+	return nil, nil
 }
