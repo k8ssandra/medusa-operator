@@ -69,11 +69,10 @@ var _ = Describe("CassandraBackup controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), cassdc)).Should(Succeed())
-		Eventually(func() bool {
+		Eventually(func() error {
 			created := &cassdcapi.CassandraDatacenter{}
-			err := k8sClient.Get(context.Background(), cassdcKey, created)
-			return err == nil
-		}, timeout, interval).Should(BeTrue())
+			return k8sClient.Get(context.Background(), cassdcKey, created)
+		}, timeout, interval).Should(Succeed())
 
 		By("create the datacenter service")
 		dcServiceKey := types.NamespacedName{Namespace: cassdcKey.Namespace, Name: cassdc.GetAllPodsServiceName()}
@@ -95,11 +94,10 @@ var _ = Describe("CassandraBackup controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), dcService)).Should(Succeed())
-		Eventually(func() bool {
+		Eventually(func() error {
 			created := &corev1.Service{}
-			err := k8sClient.Get(context.Background(), dcServiceKey, created)
-			return err == nil
-		}, timeout, interval).Should(BeTrue())
+			return k8sClient.Get(context.Background(), dcServiceKey, created)
+		}, timeout, interval).Should(Succeed())
 
 		By("create the CassandraDatacenter pods")
 		createCassandraDatacenterPods(cassdc)
@@ -137,11 +135,10 @@ var _ = Describe("CassandraBackup controller", func() {
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), backup)).Should(Succeed())
-		Eventually(func() bool {
+		Eventually(func() error {
 			created := &api.CassandraBackup{}
-			err := k8sClient.Get(context.Background(), backupKey, created)
-			return err == nil
-		}, timeout, interval).Should(BeTrue())
+			return k8sClient.Get(context.Background(), backupKey, created)
+		}, timeout, interval).Should(Succeed())
 
 		By("verify that the backups are started")
 		Eventually(func() bool {
@@ -184,9 +181,9 @@ var _ = Describe("CassandraBackup controller", func() {
 
 		By("verify that medusa gRPC clients are invoked")
 		Expect(medusaClientFactory.GetRequestedBackups()).To(Equal(map[string][]string{
-			fmt.Sprintf("192.168.1.50:%d", backupSidecarPort): {backupName},
-			fmt.Sprintf("192.168.1.51:%d", backupSidecarPort): {backupName},
-			fmt.Sprintf("192.168.1.52:%d", backupSidecarPort): {backupName},
+			fmt.Sprintf("%s:%d", getPodIpAddress(0), backupSidecarPort): {backupName},
+			fmt.Sprintf("%s:%d", getPodIpAddress(1), backupSidecarPort): {backupName},
+			fmt.Sprintf("%s:%d", getPodIpAddress(2), backupSidecarPort): {backupName},
 		}))
 	})
 })
@@ -222,7 +219,7 @@ func createCassandraDatacenterPods(cassdc *cassdcapi.CassandraDatacenter) {
 		}, timeout, interval).Should(BeTrue())
 
 		patch := client.MergeFrom(pod.DeepCopy())
-		pod.Status.PodIP = "192.168.1." + strconv.Itoa(50+int(i))
+		pod.Status.PodIP = getPodIpAddress(int(i))
 		Expect(k8sClient.Status().Patch(context.Background(), pod, patch)).Should(Succeed())
 		Eventually(func() bool {
 			updated := &corev1.Pod{}
@@ -233,6 +230,11 @@ func createCassandraDatacenterPods(cassdc *cassdcapi.CassandraDatacenter) {
 			return len(updated.Status.PodIP) > 0
 		}, timeout, interval).Should(BeTrue())
 	}
+}
+
+// Creates a fake ip address with the pod's orginal index from the StatefulSet
+func getPodIpAddress(index int) string {
+	return "192.168.1." + strconv.Itoa(50+index)
 }
 
 type fakeMedusaClientFactory struct {
