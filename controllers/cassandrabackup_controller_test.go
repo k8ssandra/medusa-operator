@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -142,7 +143,7 @@ var _ = Describe("CassandraBackup controller", func() {
 			return err == nil
 		}, timeout, interval).Should(BeTrue())
 
-		By("check that the backups are started")
+		By("verify that the backups are started")
 		Eventually(func() bool {
 			updated := &api.CassandraBackup{}
 			err := k8sClient.Get(context.Background(), backupKey, updated)
@@ -150,6 +151,35 @@ var _ = Describe("CassandraBackup controller", func() {
 				return false
 			}
 			return !updated.Status.StartTime.IsZero()
+		}, timeout, interval).Should(BeTrue())
+
+		By("verify that the CassandraDatacenter spec is added to the backup status")
+		Eventually(func() bool {
+			updated := &api.CassandraBackup{}
+			err := k8sClient.Get(context.Background(), backupKey, updated)
+			if err != nil {
+				return false
+			}
+
+			return updated.Status.CassdcTemplateSpec.Spec.ClusterName == cassdc.Spec.ClusterName &&
+				updated.Status.CassdcTemplateSpec.Spec.Size == cassdc.Spec.Size &&
+				updated.Status.CassdcTemplateSpec.Spec.ServerVersion == cassdc.Spec.ServerVersion &&
+				updated.Status.CassdcTemplateSpec.Spec.ServerImage == cassdc.Spec.ServerImage &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.Config, cassdc.Spec.Config) &&
+				updated.Status.CassdcTemplateSpec.Spec.ManagementApiAuth == cassdc.Spec.ManagementApiAuth &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.Resources, cassdc.Spec.Resources) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.SystemLoggerResources, cassdc.Spec.SystemLoggerResources) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.ConfigBuilderResources, cassdc.Spec.ConfigBuilderResources) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.Racks, cassdc.Spec.Racks) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.StorageConfig, cassdc.Spec.StorageConfig) &&
+				updated.Status.CassdcTemplateSpec.Spec.Stopped == cassdc.Spec.Stopped &&
+				updated.Status.CassdcTemplateSpec.Spec.ConfigBuilderImage == cassdc.Spec.ConfigBuilderImage &&
+				updated.Status.CassdcTemplateSpec.Spec.AllowMultipleNodesPerWorker == cassdc.Spec.AllowMultipleNodesPerWorker &&
+				updated.Status.CassdcTemplateSpec.Spec.ServiceAccount == cassdc.Spec.ServiceAccount &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.NodeSelector, cassdc.Spec.NodeSelector) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.PodTemplateSpec, cassdc.Spec.PodTemplateSpec) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.Users, cassdc.Spec.Users) &&
+				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.AdditionalSeeds, cassdc.Spec.AdditionalSeeds)
 		}, timeout, interval).Should(BeTrue())
 
 		By("verify that medusa gRPC clients are invoked")
