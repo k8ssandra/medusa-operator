@@ -1,4 +1,5 @@
 resources:
+- crd
 - cass-operator.yaml
 
 images:

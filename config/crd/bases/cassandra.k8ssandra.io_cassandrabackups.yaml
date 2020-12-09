@@ -72,6 +72,12 @@ spec:
                       description: Indicates that configuration and container image
                         changes should only be pushed to the first rack of the datacenter
                       type: boolean
+                    canaryUpgradeCount:
+                      description: The number of nodes that will be updated when CanaryUpgrade
+                        is true. Note that the value is either 0 or greater than the
+                        rack size, then all nodes in the rack will get updated.
+                      format: int32
+                      type: integer
                     clusterName:
                       description: The name by which CQL clients and instances will
                         know the cluster. If the same cluster name is shared by multiple
@@ -83,6 +89,7 @@ spec:
                       description: Config for the server, in YAML format
                       format: byte
                       type: string
+                      x-kubernetes-preserve-unknown-fields: true
                     configBuilderImage:
                       description: Container image for the config builder init container.
                       type: string
@@ -114,6 +121,10 @@ spec:
                             https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/'
                           type: object
                       type: object
+                    dockerImageRunsAsCassandra:
+                      description: Does the Server Docker image run as the Cassandra
+                        user?
+                      type: boolean
                     dseWorkloads:
                       properties:
                         analyticsEnabled:
@@ -6482,16 +6493,29 @@ spec:
                     reaper:
                       properties:
                         enabled:
+                          description: When set to true, cass-operator configures
+                            and enables remote JMX. Changing this after the cluster
+                            has been deployed will result in a rolling restart of
+                            the cluster.
                           type: boolean
                         image:
+                          description: Deprecated - this property only applied to
+                            Reaper sidecar which is no longer used.
                           type: string
                         imagePullPolicy:
-                          description: PullPolicy describes a policy for if/when to
-                            pull a container image
+                          description: Deprecated - this property only applied to
+                            Reaper sidecar which is no longer used.
+                          type: string
+                        jmxSecretName:
+                          description: The name of the secret that stores the credentials
+                            used for JMX authentication. The secret should be created
+                            in the same namespace as the CassandraDatacenter. If this
+                            property is not set, the operator will generate a default
+                            secret.
                           type: string
                         resources:
-                          description: Kubernetes resource requests and limits per
-                            reaper container.
+                          description: Deprecated - this property only applied to
+                            Reaper sidecar which is no longer used.
                           properties:
                             limits:
                               additionalProperties:
@@ -6567,14 +6591,7 @@ spec:
                     serverVersion:
                       description: Version string for config builder, used to generate
                         Cassandra server configuration
-                      enum:
-                      - 6.8.0
-                      - 6.8.1
-                      - 6.8.2
-                      - 6.8.3
-                      - 3.11.6
-                      - 3.11.7
-                      - 4.0.0
+                      pattern: (6\.8\.\d+)|(3\.11\.\d+)|(4\.0\.\d+)
                       type: string
                     serviceAccount:
                       description: The k8s service account to use for the server pods

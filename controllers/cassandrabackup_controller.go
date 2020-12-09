@@ -46,6 +46,7 @@ type CassandraBackupReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+	medusa.ClientFactory
 }
 
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrabackups,verbs=get;list;watch;create;update;patch;delete
@@ -115,6 +116,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 	// Make sure that Medusa is deployed
 	if !isMedusaDeployed(pods) {
+		// TODO generate event and/or update status to indicate error condition
 		r.Log.Error(operrors.BackupSidecarNotFound, "medusa is not deployed", "CassandraDatacenter", cassdcKey)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, operrors.BackupSidecarNotFound
 	}
@@ -133,7 +135,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		go func(pod corev1.Pod) {
 			r.Log.Info("starting backup", "CassandraPod", pod.Name)
 			succeeded := false
-			if err := doBackup(ctx, backup.Spec.Name, &pod); err == nil {
+			if err := doBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
 				r.Log.Info("finished backup", "CassandraPod", pod.Name)
 				succeeded = true
 			} else {
@@ -171,28 +173,28 @@ func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, b
 		//     * ForceUpgradeRacks
 		//     * DseWorkloads
 		Spec: cassdcapi.CassandraDatacenterSpec{
-			Size: cassdc.Spec.Size,
-			ServerVersion: cassdc.Spec.ServerVersion,
-			ServerType: cassdc.Spec.ServerType,
-			ServerImage: cassdc.Spec.ServerImage,
-			Config: cassdc.Spec.Config,
-			ManagementApiAuth: cassdc.Spec.ManagementApiAuth,
-			Resources: cassdc.Spec.Resources,
-			SystemLoggerResources: cassdc.Spec.SystemLoggerResources,
+			Size:                   cassdc.Spec.Size,
+			ServerVersion:          cassdc.Spec.ServerVersion,
+			ServerType:             cassdc.Spec.ServerType,
+			ServerImage:            cassdc.Spec.ServerImage,
+			Config:                 cassdc.Spec.Config,
+			ManagementApiAuth:      cassdc.Spec.ManagementApiAuth,
+			Resources:              cassdc.Spec.Resources,
+			SystemLoggerResources:  cassdc.Spec.SystemLoggerResources,
 			ConfigBuilderResources: cassdc.Spec.ConfigBuilderResources,
-			Racks: cassdc.Spec.Racks,
+			Racks:                  cassdc.Spec.Racks,
 			StorageConfig: cassdcapi.StorageConfig{
 				CassandraDataVolumeClaimSpec: cassdc.Spec.StorageConfig.CassandraDataVolumeClaimSpec.DeepCopy(),
 			},
-			ClusterName: cassdc.Spec.ClusterName,
-			Stopped: cassdc.Spec.Stopped,
-			ConfigBuilderImage: cassdc.Spec.ConfigBuilderImage,
+			ClusterName:                 cassdc.Spec.ClusterName,
+			Stopped:                     cassdc.Spec.Stopped,
+			ConfigBuilderImage:          cassdc.Spec.ConfigBuilderImage,
 			AllowMultipleNodesPerWorker: cassdc.Spec.AllowMultipleNodesPerWorker,
-			ServiceAccount: cassdc.Spec.ServiceAccount,
-			NodeSelector: cassdc.Spec.NodeSelector,
-			PodTemplateSpec: cassdc.Spec.PodTemplateSpec.DeepCopy(),
-			Users: cassdc.Spec.Users,
-			AdditionalSeeds: cassdc.Spec.AdditionalSeeds,
+			ServiceAccount:              cassdc.Spec.ServiceAccount,
+			NodeSelector:                cassdc.Spec.NodeSelector,
+			PodTemplateSpec:             cassdc.Spec.PodTemplateSpec.DeepCopy(),
+			Users:                       cassdc.Spec.Users,
+			AdditionalSeeds:             cassdc.Spec.AdditionalSeeds,
 			// TODO set Networking
 			// TODO set Reaper
 		},
@@ -250,9 +252,9 @@ func hasMedusaSidecar(pod *corev1.Pod) bool {
 	return false
 }
 
-func doBackup(ctx context.Context, name string, pod *corev1.Pod) error {
+func doBackup(ctx context.Context, name string, pod *corev1.Pod, clientFactory medusa.ClientFactory) error {
 	addr := fmt.Sprintf("%s:%d", pod.Status.PodIP, backupSidecarPort)
-	if medusaClient, err := medusa.NewClient(addr); err != nil {
+	if medusaClient, err := clientFactory.NewClient(addr); err != nil {
 		return err
 	} else {
 		defer medusaClient.Close()
