@@ -20,13 +20,13 @@ We will try our best to answer the question, but we also have a mailing list (k8
 **Type of question**
 <!-- Uncomment one or more of the following lines depending on what you are asking about: -->
 
-<!-- Best practices -->
-<!-- How to perform a particular operation -->
-<!-- Cassandra-related question -->
-<!-- Monitoring-related question -->
-<!-- Repair-related question -->
-<!-- Backup/restore-related question -->
-<!-- Open question -->
+- [ ] Best practices
+- [ ] How to perform a particular operation
+- [ ] Cassandra-related question
+- [ ] Monitoring-related question
+- [ ] Repair-related question
+- [ ] Backup/restore-related question
+- [ ] Open question
 
 **What did you do?**
 
@@ -72,6 +72,12 @@ k8ssandra Helm chart(s).
 * Operator logs:
 
 <!-- Please provide any medusa-operator logs relevant to the issue -->
+<!-- 
+  You can try a command like the following to get the logs if the operator was
+  installed with Helm.
+ -->
+`kubectl -n <namespace> logs -l name=<releaseName>-medusa-operator-k8ssandra`
+
 
 **Additional context**
 <!-- Add any other context about the problem here. -->
