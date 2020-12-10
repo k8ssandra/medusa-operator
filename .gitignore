@@ -10,6 +10,9 @@ bin
 # Test binary, build with `go test -c`
 *.test
 
+# Temporary build files
+build/
+
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
