@@ -46,7 +46,7 @@ test: generate fmt vet manifests
 	$(KUSTOMIZE) build config/crd > build/config/crds/medusa-operator-crds.yaml
 	$(KUSTOMIZE) build test/config/cass-operator/crd > build/config/crds/cass-operator-crds.yaml
 	test -f ${ENVTEST_ASSETS_DIR}/setup-envtest.sh || curl -sSLo ${ENVTEST_ASSETS_DIR}/setup-envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/master/hack/setup-envtest.sh
-	source ${ENVTEST_ASSETS_DIR}/setup-envtest.sh; fetch_envtest_tools $(ENVTEST_ASSETS_DIR); setup_envtest_env $(ENVTEST_ASSETS_DIR); go test ./controllers/... ./pkg/... -coverprofile cover.out
+	source ${ENVTEST_ASSETS_DIR}/setup-envtest.sh && fetch_envtest_tools $(ENVTEST_ASSETS_DIR) && setup_envtest_env $(ENVTEST_ASSETS_DIR) && go test ./controllers/... ./pkg/... -coverprofile cover.out
 
 # Build manager binary
 manager: generate fmt vet
