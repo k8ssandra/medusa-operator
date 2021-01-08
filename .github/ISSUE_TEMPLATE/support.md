@@ -30,7 +30,7 @@ We will try our best to answer the question, but we also have a mailing list (k8
 
 **What did you do?**
 
-**Did you expect to see some different?**
+**Did you expect to see something different?**
 
 **Environment (please complete the following information):**
 
@@ -45,7 +45,7 @@ We will try our best to answer the question, but we also have a mailing list (k8
 -->
 
 <!--
-Please provide the follow info if you deployed medusa-operator via the
+Please provide the following info if you deployed medusa-operator via the
 k8ssandra Helm chart(s). 
 -->
 * Helm charts version info 
