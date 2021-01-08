@@ -18,7 +18,8 @@ We will try our best to answer the question, but we also have a mailing list (k8
 -->
 
 **Type of question**
-<!-- Uncomment one or more of the following lines depending on what you are asking about: -->
+<!-- Check the box that best describes the type of question you are asking about: -->
+<!-- Make a selection like: [x] -->
 
 - [ ] Best practices
 - [ ] How to perform a particular operation
