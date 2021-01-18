@@ -98,6 +98,17 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		}
 
 		if isCassdcReady(cassdc) {
+			// Get pods with cassandra.datastax.com/datacenter=clusterName and check each one has start time > restore.Status.StartTime
+			podList := &corev1.PodList{}
+			r.List(ctx, podList, client.InNamespace(req.Namespace), client.MatchingLabels(map[string]string{"cassandra.datastax.com/datacenter": restore.Spec.CassandraDatacenter.Name}))
+
+			for _, p := range podList.Items {
+				if p.Status.StartTime.Time.Before(restore.Status.StartTime.Time) {
+					// Some pods have not restarted yet
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				}
+			}
+
 			r.Log.Info("the cassandradatacenter has been restored and is ready", "CassandraDatacenter", cassdcKey)
 
 			patch := client.MergeFrom(restore.DeepCopy())
