@@ -97,7 +97,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 			}
 		}
 
-		if isCassdcReady(cassdc) {
+		if isCassdcReady(cassdc) && wasCassdcUpdated(restore.Status.StartTime.Time, cassdc) {
 			r.Log.Info("the cassandradatacenter has been restored and is ready", "CassandraDatacenter", cassdcKey)
 
 			patch := client.MergeFrom(restore.DeepCopy())
@@ -279,12 +279,21 @@ func getEnvVarIndex(name string, envVars []corev1.EnvVar) int {
 	return -1
 }
 
+func wasCassdcUpdated(startTime time.Time, cassdc *cassdcapi.CassandraDatacenter) bool {
+	updateCondition, found := cassdc.GetCondition(cassdcapi.DatacenterUpdating)
+	if !found || updateCondition.Status != corev1.ConditionFalse {
+		return false
+	}
+	return updateCondition.LastTransitionTime.After(startTime)
+}
+
 func isCassdcReady(cassdc *cassdcapi.CassandraDatacenter) bool {
 	if cassdc.Status.CassandraOperatorProgress != cassdcapi.ProgressReady {
 		return false
 	}
-	status := cassdc.GetConditionStatus(cassdcapi.DatacenterReady)
-	return status == corev1.ConditionTrue
+
+	statusReady := cassdc.GetConditionStatus(cassdcapi.DatacenterReady)
+	return statusReady == corev1.ConditionTrue
 }
 
 func (r *CassandraRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
