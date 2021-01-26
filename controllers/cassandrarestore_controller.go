@@ -112,6 +112,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 		// TODO handle scenarios in which the CassandraDatacenter fails to become ready
 
+		r.Log.Info("waiting for CassandraDatacenter to come online", "CassandraDatacenter", cassdcKey)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -139,8 +140,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 		if restore.Spec.Shutdown {
 			if cassdc.Spec.Stopped {
-				// If cass-operator hasn't finished shutting down, wait for the next time
-				// Get pods with cassandra.datastax.com/datacenter=clusterName and check each one has start time > restore.Status.StartTime
+				// If cass-operator hasn't finished shutting down all the pods, requeue and check later again
 				podList := &corev1.PodList{}
 				r.List(ctx, podList, client.InNamespace(req.Namespace), client.MatchingLabels(map[string]string{"cassandra.datastax.com/datacenter": restore.Spec.CassandraDatacenter.Name}))
 
@@ -182,6 +182,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		if restore.Spec.Shutdown {
 			// Restart the cluster
 			cassdc.Spec.Stopped = false
+			r.Log.Info("restarting the CassandraDatacenter", "CassandraDatacenter", cassdcKey)
 		}
 
 		if err = r.Update(ctx, cassdc); err == nil {
