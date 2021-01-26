@@ -112,6 +112,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 		// TODO handle scenarios in which the CassandraDatacenter fails to become ready
 
+		r.Log.Info("waiting for CassandraDatacenter to come online", "CassandraDatacenter", cassdcKey)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -137,6 +138,30 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 		cassdc = cassdc.DeepCopy()
 
+		if restore.Spec.Shutdown {
+			if cassdc.Spec.Stopped {
+				// If cass-operator hasn't finished shutting down all the pods, requeue and check later again
+				podList := &corev1.PodList{}
+				r.List(ctx, podList, client.InNamespace(req.Namespace), client.MatchingLabels(map[string]string{"cassandra.datastax.com/datacenter": restore.Spec.CassandraDatacenter.Name}))
+
+				if len(podList.Items) > 0 {
+					// Some pods have not been shutdown yet
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				}
+			} else {
+				cassdc.Spec.Stopped = true
+				// Patch it
+				if err = r.Update(ctx, cassdc); err != nil {
+					r.Log.Error(err, "failed to update the cassandradatacenter", "CassandraDatacenter", cassdcKey)
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+				}
+
+				// Wait for next time if it's ready
+				r.Log.Info("the cassandradatacenter has been updated and will be shutdown", "CassandraDatacenter", cassdcKey)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+		}
+
 		if err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
 			r.Log.Error(err, "failed to set backup name in restore container", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
@@ -152,6 +177,12 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		if err = r.Status().Patch(ctx, restore, patch); err != nil {
 			r.Log.Error(err, "fail to patch status with start time")
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+		}
+
+		if restore.Spec.Shutdown {
+			// Restart the cluster
+			cassdc.Spec.Stopped = false
+			r.Log.Info("restarting the CassandraDatacenter", "CassandraDatacenter", cassdcKey)
 		}
 
 		if err = r.Update(ctx, cassdc); err == nil {

@@ -40,6 +40,10 @@ type CassandraRestoreSpec struct {
 	// was taken. There will be a rolling restart of the source cluster.
 	InPlace bool `json:"inPlace,omitEmpty"`
 
+	// When set to true, the cluster is shutdown before the restore is applied. This is necessary
+	// process if there are schema changes between the backup and current schema. Recommended.
+	Shutdown bool `json:"shutdown,omitEmpty"`
+
 	CassandraDatacenter CassandraDatacenterConfig `json:"cassandraDatacenter"`
 }
 
