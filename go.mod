@@ -23,7 +23,6 @@ require (
 
 replace (
 	github.com/Azure/go-autorest => github.com/Azure/go-autorest v14.1.0+incompatible
-	github.com/datastax/cass-operator => github.com/jsanda/cass-operator v1.0.1-0.20201111154347-91205f4d8f1e
 	k8s.io/api => k8s.io/api v0.18.6
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.18.6
 	k8s.io/apimachinery => k8s.io/apimachinery v0.18.6
