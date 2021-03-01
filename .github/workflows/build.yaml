@@ -28,7 +28,7 @@ jobs:
       - name: Setup gRPC Go Plugins
         run: |
           export GO111MODULE=on
-          go get google.golang.org/protobuf/cmd/protoc-gen-go google.golang.org/grpc/cmd/protoc-gen-go-grpc
+          go get google.golang.org/protobuf/cmd/protoc-gen-go google.golang.org/grpc/cmd/protoc-gen-go-grpc sigs.k8s.io/kustomize/v3
 
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
@@ -75,7 +75,41 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v2
         with:
-          push: ${{ github.event_name != 'pull_request' }}
           tags: k8ssandra/medusa-operator:${{ steps.vars.outputs.sha_short }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache
+      - name: Checkout k8ssandra charts
+        uses: actions/checkout@v2
+        with:
+          repository: k8ssandra/k8ssandra
+          path: k8ssandra
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.15
+        id: go
+      - name: Create updated CRD
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          ./kustomize build config/crd > k8ssandra/charts/medusa-operator/crds/medusa.yaml
+      - name: Send an update to k8ssandra
+        run: |
+          cd k8ssandra
+          pip3 install ruamel.yaml
+          # Update values.yaml's tag to use the newly built image
+          scripts/image-update.py --chart medusa-operator --tag ${{ steps.vars.outputs.sha_short }}
+          # Run Python update script to update chart versions to x.xx.x+1
+          scripts/helm-version.py --incr minor --chart medusa-operator --dep
+      - name: Create PR to k8ssandra
+        id: master-pr
+        uses: peter-evans/create-pull-request@v3
+        with:
+          path: k8ssandra
+          commit-message: Automated update from medusa-operator
+          delete-branch: true
+          title: Update medusa-operator to ${{ steps.vars.outputs.sha_short }}
+          body: |
+            This is auto-generated update from the medusa-operator's github actions.
+      - name: Log outputs
+        run: |
+          echo "Pull request number ${{ steps.master-pr.outputs.pull-request-number }}"
