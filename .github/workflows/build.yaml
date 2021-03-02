@@ -82,6 +82,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: k8ssandra/k8ssandra
+          ref: pr-test-branch
           path: k8ssandra
       - name: Set up Go 1.x
         uses: actions/setup-go@v2
@@ -107,6 +108,7 @@ jobs:
           path: k8ssandra
           commit-message: Automated update from medusa-operator
           delete-branch: true
+          base: pr-test-branch
           title: Update medusa-operator to ${{ steps.vars.outputs.sha_short }}
           body: |
             This is auto-generated update from the medusa-operator's github actions.
