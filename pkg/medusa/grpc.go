@@ -3,6 +3,7 @@ package medusa
 import (
 	"context"
 	"fmt"
+
 	"google.golang.org/grpc"
 
 	"github.com/k8ssandra/medusa-operator/pkg/pb"
@@ -36,6 +37,8 @@ type Client interface {
 	CreateBackup(ctx context.Context, name string) error
 
 	GetBackups(ctx context.Context) ([]*pb.BackupSummary, error)
+
+	DeleteBackup(Ctx context.Context, name string) error
 }
 
 func (c *defaultClient) Close() error {
