@@ -6973,6 +6973,8 @@ spec:
               required:
               - spec
               type: object
+            deletionInProgress:
+              type: boolean
             failed:
               items:
                 type: string

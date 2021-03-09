@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -239,6 +240,17 @@ var _ = Describe("CassandraBackup controller", func() {
 
 			return true
 		}, timeout, interval).Should(BeTrue())
+
+		By("deleting the backup")
+		Expect(k8sClient.Delete(context.Background(), backup)).Should(Succeed())
+		Eventually(func() bool {
+			existing := &api.CassandraBackup{}
+			err := k8sClient.Get(context.Background(), backupKey, existing)
+			return errors.IsNotFound(err)
+		}, timeout, interval).Should(BeTrue())
+
+		By("verifying a medusa gRPC client is invoked")
+		Expect(len(medusaClientFactory.GetDeletedBackups())).To(Equal(3))
 	})
 })
 
@@ -313,12 +325,24 @@ func (f *fakeMedusaClientFactory) GetRequestedBackups() map[string][]string {
 	return requestedBackups
 }
 
+func (f *fakeMedusaClientFactory) GetDeletedBackups() []string {
+	deletedBackups := make([]string, 0)
+	for _, v := range f.clients {
+		deletedBackups = append(deletedBackups, v.DeletedBackups...)
+	}
+	return deletedBackups
+}
+
 type fakeMedusaClient struct {
 	RequestedBackups []string
+	DeletedBackups   []string
 }
 
 func newFakeMedusaClient() *fakeMedusaClient {
-	return &fakeMedusaClient{RequestedBackups: make([]string, 0)}
+	return &fakeMedusaClient{
+		RequestedBackups: make([]string, 0),
+		DeletedBackups:   make([]string, 0),
+	}
 }
 
 func (c *fakeMedusaClient) Close() error {
@@ -332,4 +356,9 @@ func (c *fakeMedusaClient) CreateBackup(ctx context.Context, name string) error 
 
 func (c *fakeMedusaClient) GetBackups(ctx context.Context) ([]*pb.BackupSummary, error) {
 	return nil, nil
+}
+
+func (c *fakeMedusaClient) DeleteBackup(ctx context.Context, name string) error {
+	c.DeletedBackups = append(c.DeletedBackups, name)
+	return nil
 }
