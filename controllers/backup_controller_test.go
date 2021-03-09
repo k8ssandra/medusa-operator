@@ -3,6 +3,11 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strconv"
+	"sync"
+	"testing"
+
 	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/k8ssandra/medusa-operator/pkg/medusa"
@@ -10,13 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strconv"
-	"sync"
-	"testing"
 )
 
 func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
@@ -184,6 +186,18 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 		fmt.Sprintf("%s:%d", getPodIpAddress(1), backupSidecarPort): {backupName},
 		fmt.Sprintf("%s:%d", getPodIpAddress(2), backupSidecarPort): {backupName},
 	})
+
+	t.Log("deleting the backup")
+	err = testClient.Delete(context.Background(), backup)
+	assert.NoError(err, "deleting backup should succeed")
+	require.Eventually(func() bool {
+		existing := &api.CassandraBackup{}
+		err := testClient.Get(context.Background(), backupKey, existing)
+		return errors.IsNotFound(err)
+	}, timeout, interval)
+
+	t.Log("verifying a medusa gRPC client is invoked")
+	assert.Equal(1, len(medusaClientFactory.GetDeletedBackups()))
 }
 
 func createDatacenterPods(t *testing.T, ctx context.Context, dc *cassdcapi.CassandraDatacenter) {
@@ -251,12 +265,24 @@ func (f *fakeMedusaClientFactory) GetRequestedBackups() map[string][]string {
 	return requestedBackups
 }
 
+func (f *fakeMedusaClientFactory) GetDeletedBackups() []string {
+	deletedBackups := make([]string, 0)
+	for _, v := range f.clients {
+		deletedBackups = append(deletedBackups, v.DeletedBackups...)
+	}
+	return deletedBackups
+}
+
 type fakeMedusaClient struct {
 	RequestedBackups []string
+	DeletedBackups   []string
 }
 
 func newFakeMedusaClient() *fakeMedusaClient {
-	return &fakeMedusaClient{RequestedBackups: make([]string, 0)}
+	return &fakeMedusaClient{
+		RequestedBackups: make([]string, 0),
+		DeletedBackups:   make([]string, 0),
+	}
 }
 
 func (c *fakeMedusaClient) Close() error {
@@ -270,4 +296,9 @@ func (c *fakeMedusaClient) CreateBackup(ctx context.Context, name string) error 
 
 func (c *fakeMedusaClient) GetBackups(ctx context.Context) ([]*pb.BackupSummary, error) {
 	return nil, nil
+}
+
+func (c *fakeMedusaClient) DeleteBackup(ctx context.Context, name string) error {
+	c.DeletedBackups = append(c.DeletedBackups, name)
+	return nil
 }

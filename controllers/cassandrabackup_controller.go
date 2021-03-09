@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
@@ -40,6 +41,7 @@ import (
 const (
 	backupSidecarPort = 50051
 	backupSidecarName = "medusa"
+	finalizerName     = "cassandrabackups.cassandra.k8ssandra.io/finalizer"
 )
 
 // CassandraBackupReconciler reconciles a CassandraBackup object
@@ -72,6 +74,57 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}
 
 	backup := instance.DeepCopy()
+
+	// Verify the CassandraBackup has a finalizer
+	if !ctrlutil.ContainsFinalizer(backup, finalizerName) {
+		ctrlutil.AddFinalizer(backup, finalizerName)
+		err = r.Update(ctx, backup)
+		if err != nil {
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+	}
+
+	// GetDeletionTimestamp is set by the apiserver, not us. That's why we need another (DeletionInProgress) progress status
+	if backup.GetDeletionTimestamp() != nil {
+		if backup.Status.DeletionInProgress {
+			r.Log.Info("CassandraBackup is being deleted already", "Backup", req.NamespacedName)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+
+		if ctrlutil.ContainsFinalizer(backup, finalizerName) {
+			patch := client.MergeFromWithOptions(backup.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			backup.Status.DeletionInProgress = true
+
+			if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+				// Probably stale item
+				return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, nil
+			}
+
+			go func() {
+				r.Log.Info("Deletion of CassandraBackup started", "Backup", req.NamespacedName)
+				// Backup is being deleted, call Medusa to remove it also from storage
+				err = r.removeBackup(ctx, backup)
+				if err != nil {
+					r.Log.Error(err, "failed to remove backup", "Backup", req.NamespacedName)
+					patch := client.MergeFrom(backup.DeepCopy())
+					backup.Status.DeletionInProgress = false
+					if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+						r.Log.Error(err, "failed to patch status for deletion retry", "Backup", req.NamespacedName)
+					}
+					return
+				}
+
+				// Delete the finalizer to allow deletion process to finish
+				r.Log.Info("removing finalizer called", "Backup", req.NamespacedName)
+				ctrlutil.RemoveFinalizer(backup, finalizerName)
+				err = r.Update(ctx, backup)
+				if err != nil {
+					r.Log.Error(err, "failed to remove finalizer", "Backup", req.NamespacedName)
+				}
+			}()
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+	}
 
 	// If there is anything in progress, simply requeue the request
 	if len(backup.Status.InProgress) > 0 {
@@ -108,11 +161,13 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{Requeue: false}, nil
 	}
 
-	r.Log.Info("Backups have not been started yet")
+	return r.createBackup(ctx, backup)
+}
 
+func (r *CassandraBackupReconciler) createBackup(ctx context.Context, backup *api.CassandraBackup) (ctrl.Result, error) {
 	cassdcKey := types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.CassandraDatacenter}
 	cassdc := &cassdcapi.CassandraDatacenter{}
-	err = r.Get(ctx, cassdcKey, cassdc)
+	err := r.Get(ctx, cassdcKey, cassdc)
 	if err != nil {
 		r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
@@ -188,6 +243,41 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	}()
 
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+func (r *CassandraBackupReconciler) removeBackup(ctx context.Context, backup *api.CassandraBackup) error {
+	cassdcKey := types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.CassandraDatacenter}
+	cassdc := &cassdcapi.CassandraDatacenter{}
+	err := r.Get(ctx, cassdcKey, cassdc)
+	if err != nil {
+		return err
+	}
+
+	pods, err := r.getCassandraDatacenterPods(ctx, cassdc)
+	if err != nil {
+		return err
+	}
+
+	success := false
+	// Try all pods, a single success is enough
+	for _, pod := range pods {
+		if !hasMedusaSidecar(&pod) {
+			// Lets try next one, we only need to call a single pod to delete the backups
+			continue
+		}
+		if err := deleteBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
+			success = true
+			break
+		} else {
+			r.Log.Error(err, "failed to delete backups from Medusa", "CassandraBackup", backup)
+		}
+	}
+
+	if !success {
+		return fmt.Errorf("failed to delete backup %s from Medusa", backup.Spec.Name)
+	}
+
+	return nil
 }
 
 func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, backup *api.CassandraBackup, cassdc *cassdcapi.CassandraDatacenter) error {
@@ -290,6 +380,16 @@ func doBackup(ctx context.Context, name string, pod *corev1.Pod, clientFactory m
 	} else {
 		defer medusaClient.Close()
 		return medusaClient.CreateBackup(ctx, name)
+	}
+}
+
+func deleteBackup(ctx context.Context, name string, pod *corev1.Pod, clientFactory medusa.ClientFactory) error {
+	addr := fmt.Sprintf("%s:%d", pod.Status.PodIP, backupSidecarPort)
+	if medusaClient, err := clientFactory.NewClient(addr); err != nil {
+		return err
+	} else {
+		defer medusaClient.Close()
+		return medusaClient.DeleteBackup(ctx, name)
 	}
 }
 
