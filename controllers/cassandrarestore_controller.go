@@ -290,7 +290,8 @@ func setRestoreKeyInRestoreContainer(restoreKey string, cassdc *cassdcapi.Cassan
 }
 
 func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, error) {
-	initContainers := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers
+	spec := cassdc.Spec.PodTemplateSpec
+	initContainers := &spec.Spec.InitContainers
 
 	for i, container := range *initContainers {
 		if container.Name == restoreContainerName {
