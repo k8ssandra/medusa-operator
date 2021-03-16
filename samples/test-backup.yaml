@@ -1,0 +1,7 @@
+apiVersion: cassandra.k8ssandra.io/v1alpha1
+kind: CassandraBackup
+metadata:
+  name: test-1
+spec:
+  name: test-1
+  cassandraDatacenter: dc1

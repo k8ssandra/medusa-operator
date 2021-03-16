@@ -5,101 +5,109 @@ metadata:
 spec:
   clusterName: medusa-test
   serverType: cassandra
-  # We need to use a patched version of the management api image.
-  # See https://k8ssandra.atlassian.net/browse/K8C-88 for details.
-  serverImage: jsanda/mgmtapi-3_11:v0.1.13-k8c-88
-  serverVersion: 3.11.7
+  serverVersion: 3.11.10
+  serverImage: datastax/cassandra-mgmtapi-3_11_10:v0.1.23
+  dockerImageRunsAsCassandra: true
   managementApiAuth:
     insecure: {}
   size: 3
   allowMultipleNodesPerWorker: true
   config:
     jvm-options:
-      initial_heap_size: "1024m"
-      max_heap_size: "1024m"
+      initial_heap_size: "512m"
+      max_heap_size: "512m"
+      heap_size_young_generation: "256m"
   resources:
     requests:
       cpu: 1
-      memory: 2Gi
+      memory: 1200Mi
     limits:
       cpu: 1
-      memory: 2Gi
+      memory: 1200Mi
   podTemplateSpec:
     spec:
       initContainers:
-        - name: get-jolokia
-          image: busybox
-          args:
-            - /bin/sh
-            - -c
-            - wget https://search.maven.org/remotecontent?filepath=org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar && mv jolokia-jvm-1.6.2-agent.jar /config
-          volumeMounts:
-            - mountPath: /config
-              name: server-config
-        - name: medusa-restore
-          # Images are currently built from https://github.com/thelastpickle/cassandra-medusa/tree/grpc/k8s
-          image: jsanda/medusa:35d609cd0711
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: MEDUSA_MODE
-              value: RESTORE
-          volumeMounts:
-#            - name: medusa-gcp-key
-#              mountPath: /etc/medusa-secrets
-            - name: medusa-config
-              mountPath: /etc/medusa/medusa.ini
-              subPath: medusa.ini
-            - name: server-config
-              mountPath: /etc/cassandra
-            - mountPath: /var/lib/cassandra
-              name: server-data
-      containers:
-        - name: cassandra
-          env:
-          - name: JVM_EXTRA_OPTS
-            value: -javaagent:/etc/cassandra/jolokia-jvm-1.6.2-agent.jar=port=7373,host=localhost
-          volumeMounts:
-            - name: cassandra-config
-              mountPath: /etc/cassandra
-        - name: medusa
-          # Images are currently built from https://github.com/thelastpickle/cassandra-medusa/tree/grpc/k8s
-          image: jsanda/medusa:35d609cd0711
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 50051
-          env:
-            - name: MEDUSA_MODE
-              value: GRPC
-          readinessProbe:
-            exec:
-              command: [ "/bin/grpc_health_probe", "-addr=:50051" ]
-            initialDelaySeconds: 5
-          livenessProbe:
-            exec:
-              command: [ "/bin/grpc_health_probe", "-addr=:50051" ]
-            initialDelaySeconds: 10
-          volumeMounts:
-#            - name: medusa-gcp-key
-#              mountPath: /etc/medusa-secrets
-            - name: medusa-config
-              mountPath: /etc/medusa/medusa.ini
-              subPath: medusa.ini
-            - name: cassandra-config
-              mountPath: /etc/cassandra
-            - mountPath: /var/lib/cassandra
-              name: server-data
-      volumes:
-#        - name: medusa-gcp-key
-#          secret:
-#            secretName: medusa-gcp-key
+      - name: base-config-init
+        image: datastax/cassandra-mgmtapi-3_11_10:v0.1.23
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        args:
+        - -c
+        - cp -r /etc/cassandra/* /cassandra-base-config/
+        volumeMounts:
+        - name: cassandra-config
+          mountPath: /cassandra-base-config/
+      - name: server-config-init
+      - name: get-jolokia
+        image: busybox
+        args:
+        - /bin/sh
+        - -c
+        - wget -O  /config/jolokia-jvm-1.6.2-agent.jar https://search.maven.org/remotecontent?filepath=org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar
+        volumeMounts:
+        - mountPath: /config
+          name: server-config
+      - name: medusa-restore
+        image: docker.io/k8ssandra/medusa:0.9.1
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MEDUSA_MODE
+          value: RESTORE
+        volumeMounts:
         - name: medusa-config
-          configMap:
-            name: medusa-config
-            items:
+          mountPath: /etc/medusa
+        - name: server-config
+          mountPath: /etc/cassandra
+        - mountPath: /var/lib/cassandra
+          name: server-data
+        - name: medusa-bucket-key
+          mountPath: /etc/medusa-secrets
+      containers:
+      - name: cassandra
+        env:
+        - name: JVM_EXTRA_OPTS
+          value: -javaagent:/etc/cassandra/jolokia-jvm-1.6.2-agent.jar=port=7373,host=localhost
+        volumeMounts:
+        - name: cassandra-config
+          mountPath: /etc/cassandra
+      - name: medusa
+        image: docker.io/k8ssandra/medusa:0.9.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 50051
+        env:
+        - name: MEDUSA_MODE
+          value: GRPC
+        readinessProbe:
+          exec:
+            command: [ "/bin/grpc_health_probe", "-addr=:50051" ]
+          initialDelaySeconds: 5
+        livenessProbe:
+          exec:
+            command: [ "/bin/grpc_health_probe", "-addr=:50051" ]
+          initialDelaySeconds: 10
+        volumeMounts:
+        - name: medusa-config
+          mountPath: /etc/medusa
+        - name: cassandra-config
+          mountPath: /etc/cassandra
+        - mountPath: /var/lib/cassandra
+          name: server-data
+        - mountPath: /etc/medusa-secrets
+          name: medusa-bucket-key
+      volumes:
+      - name: cassandra-config
+        emptyDir: {}
+      - name: medusa-config
+        configMap:
+          name: medusa-config
+          items:
             - key: medusa.ini
               path: medusa.ini
-        - name: cassandra-config
-          emptyDir: {}
+      - name: medusa-bucket-key
+        secret:
+          secretName: medusa-bucket-key
   storageConfig:
     cassandraDataVolumeClaimSpec:
       storageClassName: standard

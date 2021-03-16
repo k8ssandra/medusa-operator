@@ -1,11 +1,15 @@
+# The cass-operator-crb ClusterRoleBinding requires a namespace for the ServiceAccount.
+# Running `kustomize build | kubectl apply -f -` directly against this directory will fail
+# since the namespace is not declared. You will instead need to run against another
+# kustomization.yaml that declares the namespace and that declares this parent directory as
+# a resource.
+
 resources:
 - crd
-- cass-operator.yaml
-
-images:
-  # We need to use a patched version of cass-operator for now that has changes needed in
-  # for Reaper and Medusa integration. Images will be built from
-  # https://github.com/jsanda/cass-operator/tree/k8ssandra.
-  - name: datastax/cass-operator
-    newName: jsanda/cass-operator
-    newTag: 91205f4d8f1e
+- service_account.yaml
+- webhook_secret.yaml
+- cluster_role.yaml
+- cluster_role_binding.yaml
+- role.yaml
+- role_binding.yaml
+- deployment.yaml
