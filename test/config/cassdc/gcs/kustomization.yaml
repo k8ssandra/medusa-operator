@@ -9,11 +9,4 @@ configMapGenerator:
   files:
     - medusa.ini
 
-patches:
-- path: cassdc-patch.yaml
-  target:
-    group: cassandra.datastax.com
-    version: v1beta1
-    kind: CassandraDatacenter
-    name: dc1
 
