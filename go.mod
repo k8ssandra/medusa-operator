@@ -3,6 +3,8 @@ module github.com/k8ssandra/medusa-operator
 go 1.15
 
 require (
+	cloud.google.com/go v0.51.0 // indirect
+	github.com/Azure/go-autorest/autorest v0.11.5 // indirect
 	github.com/datastax/cass-operator v1.6.0
 	github.com/go-logr/logr v0.1.0
 	github.com/golang/protobuf v1.4.3
@@ -10,11 +12,13 @@ require (
 	github.com/onsi/ginkgo v1.12.1
 	github.com/onsi/gomega v1.10.1
 	golang.org/x/net v0.0.0-20201209123823-ac852fbbde11 // indirect
+	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d // indirect
 	golang.org/x/sys v0.0.0-20201214210602-f9fddec55a1e // indirect
 	golang.org/x/text v0.3.4 // indirect
 	google.golang.org/genproto v0.0.0-20201214200347-8c77b98c765d // indirect
 	google.golang.org/grpc v1.34.0
 	google.golang.org/protobuf v1.25.0
+	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c
 	k8s.io/api v0.18.6
 	k8s.io/apimachinery v0.18.6
 	k8s.io/client-go v12.0.0+incompatible
@@ -23,7 +27,7 @@ require (
 )
 
 replace (
-	github.com/Azure/go-autorest => github.com/Azure/go-autorest v14.1.0+incompatible
+	github.com/Azure/go-autorest => github.com/Azure/go-autorest v14.2.0+incompatible
 	k8s.io/api => k8s.io/api v0.18.6
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.18.6
 	k8s.io/apimachinery => k8s.io/apimachinery v0.18.6
