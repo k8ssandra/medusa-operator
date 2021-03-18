@@ -69,9 +69,6 @@ var _ = BeforeSuite(func(done Done) {
 	err = api.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
-	err = api.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
 	err = cassdcapi.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -89,6 +86,13 @@ var _ = BeforeSuite(func(done Done) {
 		Log:           ctrl.Log.WithName("controllers").WithName("CassandraBackup"),
 		Scheme:        scheme.Scheme,
 		ClientFactory: medusaClientFactory,
+	}).SetupWithManager(k8sManager)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&CassandraRestoreReconciler{
+		Client: k8sManager.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("CassandraRestore"),
+		Scheme: scheme.Scheme,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
