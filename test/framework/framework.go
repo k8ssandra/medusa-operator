@@ -17,6 +17,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -106,8 +107,15 @@ func KustomizeAndApply(t *testing.T, namespace, dir string) error {
 	return err
 }
 
+func Cleanup(t *testing.T, namespace, dc string, retryInterval, timeout time.Duration) error {
+	if err := DeleteCassandraDatacenterSync(t, types.NamespacedName{Namespace: namespace, Name: dc}, retryInterval, timeout); err != nil {
+		return err
+	}
+
+	return DeleteNamespaceSync(t, namespace, retryInterval, timeout)
+}
+
 func ExecCqlsh(t *testing.T, namespace, pod, query string) (string, error) {
-	//kargs := append([]string{"exec", "-i", pod, "-c", "cassandra", "--", "cqlsh", "-e", query})
 	options := k8s.NewKubectlOptions("", "", namespace)
 
 	if output, err := k8s.RunKubectlAndGetOutputE(t, options, "exec", "-i", pod, "-c", "cassandra", "--", "cqlsh", "-e", query); err == nil {
@@ -117,37 +125,6 @@ func ExecCqlsh(t *testing.T, namespace, pod, query string) (string, error) {
 		return output, err
 	}
 
-
-	//sysProcAttr := &syscall.SysProcAttr{Noctty: true}
-	////cmd.SysProcAttr = sysProcAttr
-	//
-	//t.Logf("command: %s", cmd)
-	//if err := cmd.Start(); err != nil {
-	//	return err
-	//}
-	////out, err := cmd.CombinedOutput()
-	//
-	////t.Log(string(out))
-	//return cmd.Wait()
-
-	//return err
-
-	//cmd := exec.Command("kubectl", kargs...)
-	//cmd.Stdin = os.Stdin
-	//
-	//t.Logf("command: %s", cmd)
-	//if err := cmd.Start(); err != nil {
-	//	return err
-	//}
-	//if out, err := cmd.CombinedOutput(); err == nil {
-	//	t.Log(string(out))
-	//	return nil
-	//} else {
-	//	return err
-	//}
-
-	//t.Log(string(out))
-	//return cmd.Wait()
 }
 
 // Blocks until the cass-operator Deployment is ready. This function assumes that there will be a
@@ -178,6 +155,52 @@ func WaitForDeploymentReady(key types.NamespacedName, readyReplicas int32, retry
 	})
 }
 
+func CreateNamespace(name string) error {
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	return Client.Create(context.Background(), namespace)
+}
+
+func DeleteNamespaceSync(t *testing.T, name string, retryInterval, timeout time.Duration) error {
+	t.Logf("deleting namespace %s", name)
+
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+
+	err := Client.Get(context.Background(), types.NamespacedName{Name: name}, namespace)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	if err = Client.Delete(context.Background(), namespace); err != nil {
+		return err
+	}
+
+	return wait.Poll(retryInterval, timeout, func() (bool, error) {
+		err := Client.Get(context.Background(), types.NamespacedName{Name: name}, namespace)
+
+		if err == nil {
+			return false, nil
+		}
+
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+
+		return false, err
+	})
+}
+
 // Blocks until the CassandraDatacenter is ready or until the timeout is reached. Readiness
 // is determined by the Ready condition in the CassandraDatacenter status. An error is
 // returned if fetching the CassandraDatacenter fails.
@@ -204,6 +227,37 @@ func GetCassandraDatacenter(key types.NamespacedName) (*cassdcv1beta1.CassandraD
 	err := Client.Get(context.Background(), key, cassdc)
 
 	return cassdc, err
+}
+
+func DeleteCassandraDatacenterSync(t *testing.T, key types.NamespacedName, retryInterval, timeout time.Duration) error {
+	t.Logf("deleting cassandradatacenter %s", key)
+
+	cassdc, err := GetCassandraDatacenter(key)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	if err = Client.Delete(context.Background(), cassdc); err != nil {
+		return err
+	}
+
+	return wait.Poll(retryInterval, timeout, func() (bool, error) {
+		_, err := GetCassandraDatacenter(key)
+
+		if err == nil {
+			return false, nil
+		}
+
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+
+		return false, err
+	})
 }
 
 func logCassDcStatus(t *testing.T, cassdc *cassdcv1beta1.CassandraDatacenter, start time.Time) {

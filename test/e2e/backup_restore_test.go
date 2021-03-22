@@ -26,6 +26,14 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	namespace := "medusa-dev"
 	ctx := context.Background()
 
+	if err := framework.Cleanup(t, namespace, "dc1", 10 * time.Second, 3 * time.Minute); err != nil {
+		t.Fatalf("failed to cleanup before test: %s", err)
+	}
+
+	if err := framework.CreateNamespace(namespace); err != nil {
+		t.Fatalf("failed to create namespace: %s", err)
+	}
+
 	t.Log("running kustomize and kubectl apply")
 	if err := framework.KustomizeAndApply(t, namespace, "dev/s3"); err != nil {
 		t.Fatalf("failed to apply manifests: %s", err)
