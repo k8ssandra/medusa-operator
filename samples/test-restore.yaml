@@ -3,7 +3,7 @@ kind: CassandraRestore
 metadata:
   name: test
 spec:
-  backup: test-1
+  backup: test-backup
   inPlace: true
   shutdown: false
   cassandraDatacenter:

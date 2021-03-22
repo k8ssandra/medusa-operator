@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	cassdcv1beta1 "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
+	"github.com/gruntwork-io/terratest/modules/k8s"
+	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
+	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"gopkg.in/yaml.v3"
-
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -106,6 +106,50 @@ func KustomizeAndApply(t *testing.T, namespace, dir string) error {
 	return err
 }
 
+func ExecCqlsh(t *testing.T, namespace, pod, query string) (string, error) {
+	//kargs := append([]string{"exec", "-i", pod, "-c", "cassandra", "--", "cqlsh", "-e", query})
+	options := k8s.NewKubectlOptions("", "", namespace)
+
+	if output, err := k8s.RunKubectlAndGetOutputE(t, options, "exec", "-i", pod, "-c", "cassandra", "--", "cqlsh", "-e", query); err == nil {
+		//t.Log(output)
+		return output, nil
+	} else {
+		return output, err
+	}
+
+
+	//sysProcAttr := &syscall.SysProcAttr{Noctty: true}
+	////cmd.SysProcAttr = sysProcAttr
+	//
+	//t.Logf("command: %s", cmd)
+	//if err := cmd.Start(); err != nil {
+	//	return err
+	//}
+	////out, err := cmd.CombinedOutput()
+	//
+	////t.Log(string(out))
+	//return cmd.Wait()
+
+	//return err
+
+	//cmd := exec.Command("kubectl", kargs...)
+	//cmd.Stdin = os.Stdin
+	//
+	//t.Logf("command: %s", cmd)
+	//if err := cmd.Start(); err != nil {
+	//	return err
+	//}
+	//if out, err := cmd.CombinedOutput(); err == nil {
+	//	t.Log(string(out))
+	//	return nil
+	//} else {
+	//	return err
+	//}
+
+	//t.Log(string(out))
+	//return cmd.Wait()
+}
+
 // Blocks until the cass-operator Deployment is ready. This function assumes that there will be a
 // single replica in the Deployment.
 func WaitForCassOperatorReady(namespace string) error {
@@ -121,7 +165,7 @@ func WaitForMedusaOperatorReady(namespace string) error {
 // Blocks until .Status.ReadyReplicas == readyReplicas or until timeout is reached. An error is returned
 // if fetching the Deployment fails.
 func WaitForDeploymentReady(key types.NamespacedName, readyReplicas int32, retryInterval, timeout time.Duration) error {
-	return wait.Poll(retryInterval, timeout, func() (bool, error) {
+	return wait.PollImmediate(retryInterval, timeout, func() (bool, error) {
 		deployment := &appsv1.Deployment{}
 		err := Client.Get(context.Background(), key, deployment)
 		if err != nil {
@@ -139,7 +183,7 @@ func WaitForDeploymentReady(key types.NamespacedName, readyReplicas int32, retry
 // returned if fetching the CassandraDatacenter fails.
 func WaitForCassandraDatacenterReady(t *testing.T, key types.NamespacedName, retryInterval, timeout time.Duration) error {
 	start := time.Now()
-	return wait.Poll(retryInterval, timeout, func() (bool, error) {
+	return wait.PollImmediate(retryInterval, timeout, func() (bool, error) {
 		cassdc, err := GetCassandraDatacenter(key)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
@@ -191,4 +235,18 @@ func GetBackup(key types.NamespacedName) (*api.CassandraBackup, error) {
 	err := Client.Get(context.Background(), key, backup)
 
 	return backup, err
+}
+
+func WaitForRestoreToFinish(key types.NamespacedName, retryInterval, timeout time.Duration) error {
+	return wait.Poll(retryInterval, timeout, func() (bool, error) {
+		restore := &api.CassandraRestore{}
+		err := Client.Get(context.Background(), key, restore)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			return true, err
+		}
+		return !restore.Status.FinishTime.IsZero(), nil
+	})
 }

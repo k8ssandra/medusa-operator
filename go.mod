@@ -3,16 +3,14 @@ module github.com/k8ssandra/medusa-operator
 go 1.15
 
 require (
-	cloud.google.com/go v0.51.0 // indirect
-	github.com/Azure/go-autorest/autorest v0.11.5 // indirect
 	github.com/datastax/cass-operator v1.6.0
 	github.com/go-logr/logr v0.1.0
 	github.com/golang/protobuf v1.4.3
 	github.com/google/uuid v1.1.2
+	github.com/gruntwork-io/terratest v0.30.15
 	github.com/onsi/ginkgo v1.12.1
 	github.com/onsi/gomega v1.10.1
 	golang.org/x/net v0.0.0-20201209123823-ac852fbbde11 // indirect
-	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d // indirect
 	golang.org/x/sys v0.0.0-20201214210602-f9fddec55a1e // indirect
 	golang.org/x/text v0.3.4 // indirect
 	google.golang.org/genproto v0.0.0-20201214200347-8c77b98c765d // indirect

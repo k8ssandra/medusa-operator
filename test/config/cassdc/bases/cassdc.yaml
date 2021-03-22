@@ -7,6 +7,7 @@ spec:
   serverType: cassandra
   serverVersion: 3.11.10
   serverImage: datastax/cassandra-mgmtapi-3_11_10:v0.1.23
+  disableSystemLoggerSidecar: true
   dockerImageRunsAsCassandra: true
   managementApiAuth:
     insecure: {}
@@ -49,8 +50,9 @@ spec:
         - mountPath: /config
           name: server-config
       - name: medusa-restore
-        image: docker.io/k8ssandra/medusa:0.9.1
-        imagePullPolicy: IfNotPresent
+#        image: docker.io/k8ssandra/medusa:0.9.1
+        image: docker.io/jsanda/medusa:latest
+        imagePullPolicy: Always
         env:
         - name: MEDUSA_MODE
           value: RESTORE
@@ -72,8 +74,9 @@ spec:
         - name: cassandra-config
           mountPath: /etc/cassandra
       - name: medusa
-        image: docker.io/k8ssandra/medusa:0.9.1
-        imagePullPolicy: IfNotPresent
+#        image: docker.io/k8ssandra/medusa:0.9.1
+        image: docker.io/jsanda/medusa:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 50051
         env:
