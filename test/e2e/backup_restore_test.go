@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,6 +18,14 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
+const (
+	timeout3Min = 3 * time.Minute
+	timeout7Min = 7 * time.Minute
+	timeout15Min = 15 * time.Minute
+	retry15Sec = 15 * time.Second
+	retry45Sec = 45 * time.Second
+)
+
 type user struct {
 	Email string
 	Name  string
@@ -26,7 +35,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	namespace := "medusa-dev"
 	ctx := context.Background()
 
-	if err := framework.Cleanup(t, namespace, "dc1", 10 * time.Second, 3 * time.Minute); err != nil {
+	if err := framework.Cleanup(t, namespace, "dc1", retry15Sec, timeout3Min); err != nil {
 		t.Fatalf("failed to cleanup before test: %s", err)
 	}
 
@@ -35,8 +44,17 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	}
 
 	t.Log("running kustomize and kubectl apply")
-	if err := framework.KustomizeAndApply(t, namespace, "dev/s3"); err != nil {
+	if err := framework.KustomizeAndApply(t, namespace, "dev/s3", 3); err != nil {
 		t.Fatalf("failed to apply manifests: %s", err)
+	}
+
+	storageSecretKey := types.NamespacedName{Namespace: namespace, Name: "medusa-bucket-key"}
+	if _, err := framework.GetSecret(t, storageSecretKey); err != nil {
+		if apierrors.IsNotFound(err) {
+			t.Fatalf("storage secret %s not found", storageSecretKey)
+		}  else {
+			t.Fatalf("failed to get storage secret %s: %s", storageSecretKey, err)
+		}
 	}
 
 	t.Log("waiting for cass-operator to become ready")
@@ -50,11 +68,9 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	}
 
 	key := types.NamespacedName{Namespace: namespace, Name: "dc1"}
-	cassdcRetryInterval := 15 * time.Second
-	cassdcTimeout := 7 * time.Minute
 
 	t.Logf("waiting for cassandradatacenter to become ready")
-	if err := framework.WaitForCassandraDatacenterReady(t, key, cassdcRetryInterval, cassdcTimeout); err != nil {
+	if err := framework.WaitForCassandraDatacenterReady(t, key, retry15Sec, timeout7Min); err != nil {
 		t.Fatalf("timed out waiting for cassandradatacenter to become ready: %s", err)
 	}
 
@@ -84,10 +100,10 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	backup := &api.CassandraBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: backupKey.Namespace,
-			Name: backupKey.Name,
+			Name:      backupKey.Name,
 		},
 		Spec: api.CassandraBackupSpec{
-			Name: backupKey.Name,
+			Name:                backupKey.Name,
 			CassandraDatacenter: "dc1",
 		},
 	}
@@ -97,7 +113,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	}
 
 	t.Logf("waiting for cassandrabackup %s to finish", backupKey)
-	if err := framework.WaitForBackupToFinish(types.NamespacedName{Namespace: namespace, Name: "test-backup"}, cassdcRetryInterval, cassdcTimeout); err != nil {
+	if err := framework.WaitForBackupToFinish(types.NamespacedName{Namespace: namespace, Name: "test-backup"}, retry15Sec, timeout7Min); err != nil {
 		t.Fatalf("timed out waiting for backup %s to finish", backupKey)
 	}
 
@@ -124,13 +140,13 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	restore := &api.CassandraRestore{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: restoreKey.Namespace,
-			Name: restoreKey.Name,
+			Name:      restoreKey.Name,
 		},
 		Spec: api.CassandraRestoreSpec{
-			Backup: backupKey.Name,
+			Backup:  backupKey.Name,
 			InPlace: true,
 			CassandraDatacenter: api.CassandraDatacenterConfig{
-				Name: "dc1",
+				Name:        "dc1",
 				ClusterName: "medusa-test",
 			},
 		},
@@ -141,7 +157,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	}
 
 	t.Logf("waiting for cassandrarestore %s to finish", restoreKey)
-	if err := framework.WaitForRestoreToFinish(restoreKey, time.Second * 45, time.Minute * 18); err != nil {
+	if err := framework.WaitForRestoreToFinish(restoreKey, retry45Sec, timeout15Min); err != nil {
 		t.Fatalf("timed out waiting for restore %s to finish", restoreKey)
 	}
 
@@ -187,7 +203,7 @@ func rowCountMatches(t *testing.T, namespace string, count int) (bool, error) {
 	cql := "select * from medusa_dev.users"
 
 	if output, err := framework.ExecCqlsh(t, namespace, pod, cql); err == nil {
-		return strings.Contains(output, strconv.Itoa(count) + " rows"), nil
+		return strings.Contains(output, strconv.Itoa(count)+" rows"), nil
 	} else {
 		return false, err
 	}

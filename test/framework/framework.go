@@ -75,7 +75,7 @@ func createClient() client.Client {
 // the TEST_OVERLAY environment variable to specify the fork overlay to use. When
 // TEST_OVERLAY is set this function will run kustomize build on
 // dir/overlays/forks/TEST_OVERLAY which will allow you to use a custom operator image.
-func KustomizeAndApply(t *testing.T, namespace, dir string) error {
+func KustomizeAndApply(t *testing.T, namespace, dir string, retries int) error {
 	kustomizeDir := ""
 
 	path, err := os.Getwd()
@@ -89,24 +89,37 @@ func KustomizeAndApply(t *testing.T, namespace, dir string) error {
 		kustomizeDir = filepath.Clean(path + "/../config/" + dir)
 	}
 
-	kustomize := exec.Command("kustomize", "build", kustomizeDir)
-	var stdout, stderr bytes.Buffer
-	kustomize.Stdout = &stdout
-	kustomize.Stderr = &stderr
-	err = kustomize.Run()
+	err = nil
+	for i := 0; i < retries; i++ {
+		kustomize := exec.Command("kustomize", "build", kustomizeDir)
+		var stdout, stderr bytes.Buffer
+		kustomize.Stdout = &stdout
+		kustomize.Stderr = &stderr
+		err = kustomize.Run()
 
-	if err != nil {
-		return err
+		if err != nil {
+			t.Logf("kustomize build failed: %s", err)
+			continue
+		}
+
+		kubectl := exec.Command("kubectl", "-n", namespace, "apply", "-f", "-")
+		kubectl.Stdin = &stdout
+		out, err := kubectl.CombinedOutput()
+		t.Log(string(out))
+
+		if err == nil {
+			return nil
+		} else {
+			t.Logf("kubectl apply failed: %s", err)
+		}
 	}
-
-	kubectl := exec.Command("kubectl", "-n", namespace, "apply", "-f", "-")
-	kubectl.Stdin = &stdout
-	out, err := kubectl.CombinedOutput()
-	t.Log(string(out))
 
 	return err
 }
 
+// Deletes the CassandraDataenter and then the namespace. Both deletions are blocking which
+// means when this function returns both the CassandraDatacenter and namespace will have
+// been terminated. retryInterval and timeout are applied to both deletion operations.
 func Cleanup(t *testing.T, namespace, dc string, retryInterval, timeout time.Duration) error {
 	if err := DeleteCassandraDatacenterSync(t, types.NamespacedName{Namespace: namespace, Name: dc}, retryInterval, timeout); err != nil {
 		return err
@@ -125,6 +138,12 @@ func ExecCqlsh(t *testing.T, namespace, pod, query string) (string, error) {
 		return output, err
 	}
 
+}
+
+func GetSecret(t *testing.T, key types.NamespacedName) (*corev1.Secret, error) {
+	secret := &corev1.Secret{}
+	err := Client.Get(context.Background(), key, secret)
+	return secret, err
 }
 
 // Blocks until the cass-operator Deployment is ready. This function assumes that there will be a
