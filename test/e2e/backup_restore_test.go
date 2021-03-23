@@ -35,6 +35,17 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	namespace := "medusa-dev"
 	ctx := context.Background()
 
+	// TODO make this configurable
+	s3Bucket := "k8ssandra-medusa-dev"
+
+	if bucketCleaner, err := framework.NewBucketObjectDeleter("aws"); err == nil {
+		if _, err := bucketCleaner.DeleteObjects(t, s3Bucket); err != nil {
+			t.Logf("failed to delete objects from s3 bucket %s: %s", s3Bucket, err)
+		}
+	} else {
+		t.Logf("failed to create BucketObjectDeleter: %s", err)
+	}
+
 	if err := framework.Cleanup(t, namespace, "dc1", retry15Sec, timeout3Min); err != nil {
 		t.Fatalf("failed to cleanup before test: %s", err)
 	}
