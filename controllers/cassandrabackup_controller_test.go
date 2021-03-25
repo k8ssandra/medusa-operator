@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/k8ssandra/medusa-operator/pkg/medusa"
@@ -196,6 +197,16 @@ var _ = Describe("CassandraBackup controller", func() {
 				reflect.DeepEqual(updated.Status.CassdcTemplateSpec.Spec.AdditionalSeeds, cassdc.Spec.AdditionalSeeds)
 		}, timeout, interval).Should(BeTrue())
 
+		By("verify the backup finished")
+		Eventually(func() bool {
+			updated := &api.CassandraBackup{}
+			err := k8sClient.Get(context.Background(), backupKey, updated)
+			if err != nil {
+				return false
+			}
+			return len(updated.Status.Finished) > 0
+		}, timeout, interval).Should(BeTrue())
+
 		By("verify that medusa gRPC clients are invoked")
 		Expect(medusaClientFactory.GetRequestedBackups()).To(Equal(map[string][]string{
 			fmt.Sprintf("%s:%d", getPodIpAddress(0), backupSidecarPort): {backupName},
@@ -233,8 +244,7 @@ var _ = Describe("CassandraBackup controller", func() {
 				Namespace: restoreKey.Namespace,
 			}
 
-			err := k8sClient.Get(context.Background(), cassDcRestoredKey, createdCassDc)
-			if err != nil {
+			if err := k8sClient.Get(context.Background(), cassDcRestoredKey, createdCassDc); err != nil {
 				return false
 			}
 
@@ -250,7 +260,7 @@ var _ = Describe("CassandraBackup controller", func() {
 		}, timeout, interval).Should(BeTrue())
 
 		By("verifying a medusa gRPC client is invoked")
-		Expect(len(medusaClientFactory.GetDeletedBackups())).To(Equal(3))
+		Expect(len(medusaClientFactory.GetDeletedBackups())).To(Equal(1))
 	})
 })
 
@@ -304,7 +314,8 @@ func getPodIpAddress(index int) string {
 }
 
 type fakeMedusaClientFactory struct {
-	clients map[string]*fakeMedusaClient
+	clientsMutex sync.Mutex
+	clients      map[string]*fakeMedusaClient
 }
 
 func NewMedusaClientFactory() *fakeMedusaClientFactory {
@@ -313,7 +324,9 @@ func NewMedusaClientFactory() *fakeMedusaClientFactory {
 
 func (f *fakeMedusaClientFactory) NewClient(address string) (medusa.Client, error) {
 	medusaClient := newFakeMedusaClient()
+	f.clientsMutex.Lock()
 	f.clients[address] = medusaClient
+	f.clientsMutex.Unlock()
 	return medusaClient, nil
 }
 

@@ -80,44 +80,52 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		}
 	}
 
-	// If there is anything in progress, simply requeue the request
-	if len(backup.Status.InProgress) > 0 || backup.Status.DeletionInProgress {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	}
-
+	// GetDeletionTimestamp is set by the apiserver, not us. That's why we need another (DeletionInProgress) progress status
 	if backup.GetDeletionTimestamp() != nil {
+		if backup.Status.DeletionInProgress {
+			r.Log.Info("CassandraBackup is being deleted already", "Backup", req.NamespacedName)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
 		if ctrlutil.ContainsFinalizer(backup, finalizerName) {
-			// Deletion process has already been started, return later
+			r.Log.Info("Deletion of CassandraBackup started", "Backup", req.NamespacedName)
 			patch := client.MergeFrom(backup.DeepCopy())
 			backup.Status.DeletionInProgress = true
 
 			if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
-				r.Log.Error(err, "failed to patch status with backup deletion inprogress status", "Backup", backup)
+				r.Log.Error(err, "failed to patch status with backup deletion inprogress status", "Backup", req.NamespacedName)
 				return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, err
 			}
 
 			go func() {
+				r.Log.Info("removeBackup called", "Backup", req.NamespacedName)
 				// Backup is being deleted, call Medusa to remove it also from storage
 				err = r.removeBackup(ctx, backup)
 				if err != nil {
-					r.Log.Error(err, "failed to remove backup", "Backup", backup)
+					r.Log.Error(err, "failed to remove backup", "Backup", req.NamespacedName)
 					patch := client.MergeFrom(backup.DeepCopy())
 					backup.Status.DeletionInProgress = false
 					if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
-						r.Log.Error(err, "failed to patch status for deletion retry", "Backup", backup)
+						r.Log.Error(err, "failed to patch status for deletion retry", "Backup", req.NamespacedName)
 					}
 					return
 				}
 
 				// Delete the finalizer to allow deletion process to finish
+				r.Log.Info("removing finalizer called", "Backup", req.NamespacedName)
 				ctrlutil.RemoveFinalizer(backup, finalizerName)
 				err = r.Update(ctx, backup)
 				if err != nil {
-					r.Log.Error(err, "failed to remove finalizer", "Backup", backup)
+					r.Log.Error(err, "failed to remove finalizer", "Backup", req.NamespacedName)
 				}
 			}()
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
+	}
+
+	// If there is anything in progress, simply requeue the request
+	if len(backup.Status.InProgress) > 0 {
+		r.Log.Info("CassandraBackup is being processed already", "Backup", req.NamespacedName)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// If the backup is already finished, there is nothing to do.
@@ -183,7 +191,9 @@ func (r *CassandraBackupReconciler) createBackup(ctx context.Context, backup *ap
 	}
 
 	for _, p := range pods {
-		go func(pod corev1.Pod) {
+		pod := p
+		backup := backup.DeepCopy()
+		go func() {
 			r.Log.Info("starting backup", "CassandraPod", pod.Name)
 			succeeded := false
 			if err := doBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
@@ -202,7 +212,7 @@ func (r *CassandraBackupReconciler) createBackup(ctx context.Context, backup *ap
 			if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
 				r.Log.Error(err, "failed to patch status", "Backup", backup)
 			}
-		}(p)
+		}()
 	}
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
@@ -229,6 +239,7 @@ func (r *CassandraBackupReconciler) removeBackup(ctx context.Context, backup *ap
 		}
 		if err := deleteBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
 			success = true
+			break
 		} else {
 			r.Log.Error(err, "failed to delete backups from Medusa", "CassandraBackup", backup)
 		}
@@ -237,9 +248,6 @@ func (r *CassandraBackupReconciler) removeBackup(ctx context.Context, backup *ap
 	if !success {
 		return fmt.Errorf("Failed to delete backup %s from Medusa", backup.Spec.Name)
 	}
-
-	// What if there are no longer any active Medusa installations in the cluster?
-	// What if user wants to delete this cluster, but restore the backups to external cluster?
 
 	return nil
 }
