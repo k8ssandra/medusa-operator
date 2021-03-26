@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -69,6 +70,12 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 	backup := instance.DeepCopy()
 
+	// If there is anything in progress, simply requeue the request
+	if len(backup.Status.InProgress) > 0 {
+		r.Log.Info("CassandraBackup is being processed already", "Backup", req.NamespacedName)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
 	// If the backup is already finished, there is nothing to do.
 	if backupFinished(backup) {
 		return ctrl.Result{Requeue: false}, nil
@@ -104,11 +111,6 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
-	if err = r.addCassdcSpecToStatus(ctx, backup, cassdc); err != nil {
-		r.Log.Error(err, "failed to patch status with CassdcTemplateSpec", "CassandraDatacenter", cassdcKey)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-	}
-
 	pods, err := r.getCassandraDatacenterPods(ctx, cassdc)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
@@ -121,40 +123,59 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, operrors.BackupSidecarNotFound
 	}
 
-	patch := client.MergeFrom(backup.DeepCopy())
+	patch := client.MergeFromWithOptions(backup.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	if err = r.addCassdcSpecToStatus(ctx, backup, cassdc); err != nil {
+		r.Log.Error(err, "failed to patch status with CassdcTemplateSpec", "CassandraDatacenter", cassdcKey)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+	}
+
 	backup.Status.StartTime = metav1.Now()
 	for _, pod := range pods {
 		backup.Status.InProgress = append(backup.Status.InProgress, pod.Name)
 	}
 	if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
-		r.Log.Error(err, "failed to patch status with backup start time", "Backup", backup)
-		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, err
+		// We received a stale object, requeue for next processing
+		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, nil
 	}
 
-	for _, p := range pods {
-		go func(pod corev1.Pod) {
-			r.Log.Info("starting backup", "CassandraPod", pod.Name)
-			succeeded := false
-			if err := doBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
-				r.Log.Info("finished backup", "CassandraPod", pod.Name)
-				succeeded = true
-			} else {
-				r.Log.Error(err, "backup failed", "CassandraPod", pod.Name)
-			}
-			patch := client.MergeFrom(backup.DeepCopy())
-			backup.Status.InProgress = removeValue(backup.Status.InProgress, pod.Name)
-			if succeeded {
-				backup.Status.Finished = append(backup.Status.Finished, pod.Name)
-			} else {
-				backup.Status.Failed = append(backup.Status.Failed, pod.Name)
-			}
-			if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
-				r.Log.Error(err, "failed to patch status", "Backup", backup)
-			}
-		}(p)
-	}
+	// Do the actual backup in the background
+	go func() {
+		wg := sync.WaitGroup{}
 
-	return ctrl.Result{}, nil
+		// Mutex to prevent concurrent updates to the backup.Status object
+		backupMutex := sync.Mutex{}
+		patch := client.MergeFrom(backup.DeepCopy())
+
+		for _, p := range pods {
+			pod := p
+			wg.Add(1)
+			go func() {
+				r.Log.Info("starting backup", "CassandraPod", pod.Name)
+				succeeded := false
+				if err := doBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
+					r.Log.Info("finished backup", "CassandraPod", pod.Name)
+					succeeded = true
+				} else {
+					r.Log.Error(err, "backup failed", "CassandraPod", pod.Name)
+				}
+				backupMutex.Lock()
+				defer backupMutex.Unlock()
+				defer wg.Done()
+				backup.Status.InProgress = removeValue(backup.Status.InProgress, pod.Name)
+				if succeeded {
+					backup.Status.Finished = append(backup.Status.Finished, pod.Name)
+				} else {
+					backup.Status.Failed = append(backup.Status.Failed, pod.Name)
+				}
+			}()
+		}
+		wg.Wait()
+		if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+			r.Log.Error(err, "failed to patch status", "Backup", fmt.Sprintf("%s/%s", backup.Name, backup.Namespace))
+		}
+	}()
+
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, backup *api.CassandraBackup, cassdc *cassdcapi.CassandraDatacenter) error {
@@ -200,10 +221,8 @@ func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, b
 		},
 	}
 
-	patch := client.MergeFrom(backup.DeepCopy())
 	backup.Status.CassdcTemplateSpec = templateSpec
-
-	return r.Status().Patch(ctx, backup, patch)
+	return nil
 }
 
 func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Context, cassdc *cassdcapi.CassandraDatacenter) ([]corev1.Pod, error) {
