@@ -204,7 +204,7 @@ var _ = Describe("CassandraBackup controller", func() {
 			if err != nil {
 				return false
 			}
-			return len(updated.Status.Finished) > 0
+			return len(updated.Status.Finished) == 3 && len(updated.Status.InProgress) == 0
 		}, timeout, interval).Should(BeTrue())
 
 		By("verify that medusa gRPC clients are invoked")
