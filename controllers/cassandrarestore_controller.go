@@ -68,8 +68,8 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 	if len(restore.Status.RestoreKey) == 0 {
 		if err = r.setRestoreKey(ctx, restore); err != nil {
-			r.Log.Error(err, "failed to set restore key")
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+			// Could be stale item, we'll just requeue - this process can be repeated
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 	}
 
@@ -172,7 +172,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
 
-		patch := client.MergeFrom(restore.DeepCopy())
+		patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		restore.Status.StartTime = metav1.Now()
 		if err = r.Status().Patch(ctx, restore, patch); err != nil {
 			r.Log.Error(err, "fail to patch status with start time")
@@ -223,7 +223,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 func (r *CassandraRestoreReconciler) setRestoreKey(ctx context.Context, restore *api.CassandraRestore) error {
 	key := uuid.New()
-	patch := client.MergeFrom(restore.DeepCopy())
+	patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	restore.Status.RestoreKey = key.String()
 
 	return r.Status().Patch(ctx, restore, patch)
