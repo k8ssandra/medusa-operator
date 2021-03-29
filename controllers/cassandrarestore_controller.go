@@ -66,9 +66,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 	restore := instance.DeepCopy()
 
-	if len(restore.Status.RestoreKey) != 0 {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-	} else {
+	if len(restore.Status.RestoreKey) == 0 {
 		if err = r.setRestoreKey(ctx, restore); err != nil {
 			// Could be stale item, we'll just requeue - this process can be repeated
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
