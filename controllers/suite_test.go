@@ -102,6 +102,7 @@ var _ = BeforeSuite(func(done Done) {
 	}()
 
 	testClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
+	Expect(err).To(BeNil())
 	Expect(testClient).ToNot(BeNil())
 
 	close(done)
