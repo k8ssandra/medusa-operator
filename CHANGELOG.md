@@ -10,6 +10,7 @@ Changelog for medusa-operator. New PRs should update the `master / unreleased` s
 ```
 
 ## master / unreleased
+* [CHANGE] #35 Do not use the manager client in tests
 
 ## v0.2.0 - 2021-04-07
 
