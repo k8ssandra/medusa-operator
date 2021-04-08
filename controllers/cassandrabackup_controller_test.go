@@ -38,7 +38,7 @@ var _ = Describe("CassandraBackup controller", func() {
 				Name: testNamespace,
 			},
 		}
-		Expect(k8sClient.Create(context.Background(), testNamespace)).Should(Succeed())
+		Expect(testClient.Create(context.Background(), testNamespace)).Should(Succeed())
 		i = i + 1
 	})
 
@@ -85,10 +85,10 @@ var _ = Describe("CassandraBackup controller", func() {
 				},
 			},
 		}
-		Expect(k8sClient.Create(context.Background(), cassdc)).Should(Succeed())
+		Expect(testClient.Create(context.Background(), cassdc)).Should(Succeed())
 		Eventually(func() error {
 			created := &cassdcapi.CassandraDatacenter{}
-			return k8sClient.Get(context.Background(), cassdcKey, created)
+			return testClient.Get(context.Background(), cassdcKey, created)
 		}, timeout, interval).Should(Succeed())
 
 		By("create the datacenter service")
@@ -110,10 +110,10 @@ var _ = Describe("CassandraBackup controller", func() {
 				},
 			},
 		}
-		Expect(k8sClient.Create(context.Background(), dcService)).Should(Succeed())
+		Expect(testClient.Create(context.Background(), dcService)).Should(Succeed())
 		Eventually(func() error {
 			created := &corev1.Service{}
-			return k8sClient.Get(context.Background(), dcServiceKey, created)
+			return testClient.Get(context.Background(), dcServiceKey, created)
 		}, timeout, interval).Should(Succeed())
 
 		By("create the CassandraDatacenter pods")
@@ -128,10 +128,10 @@ var _ = Describe("CassandraBackup controller", func() {
 				Type:   cassdcapi.DatacenterReady,
 			},
 		}
-		Expect(k8sClient.Status().Patch(context.Background(), cassdc, patch)).Should(Succeed())
+		Expect(testClient.Status().Patch(context.Background(), cassdc, patch)).Should(Succeed())
 		Eventually(func() bool {
 			updated := &cassdcapi.CassandraDatacenter{}
-			err := k8sClient.Get(context.Background(), cassdcKey, updated)
+			err := testClient.Get(context.Background(), cassdcKey, updated)
 			if err != nil {
 				return false
 			}
@@ -151,16 +151,16 @@ var _ = Describe("CassandraBackup controller", func() {
 				CassandraDatacenter: cassdcKey.Name,
 			},
 		}
-		Expect(k8sClient.Create(context.Background(), backup)).Should(Succeed())
+		Expect(testClient.Create(context.Background(), backup)).Should(Succeed())
 		Eventually(func() error {
 			created := &api.CassandraBackup{}
-			return k8sClient.Get(context.Background(), backupKey, created)
+			return testClient.Get(context.Background(), backupKey, created)
 		}, timeout, interval).Should(Succeed())
 
 		By("verify that the backups are started")
 		Eventually(func() bool {
 			updated := &api.CassandraBackup{}
-			err := k8sClient.Get(context.Background(), backupKey, updated)
+			err := testClient.Get(context.Background(), backupKey, updated)
 			if err != nil {
 				return false
 			}
@@ -170,7 +170,7 @@ var _ = Describe("CassandraBackup controller", func() {
 		By("verify that the CassandraDatacenter spec is added to the backup status")
 		Eventually(func() bool {
 			updated := &api.CassandraBackup{}
-			err := k8sClient.Get(context.Background(), backupKey, updated)
+			err := testClient.Get(context.Background(), backupKey, updated)
 			if err != nil {
 				return false
 			}
@@ -199,7 +199,7 @@ var _ = Describe("CassandraBackup controller", func() {
 		By("verify the backup finished")
 		Eventually(func() bool {
 			updated := &api.CassandraBackup{}
-			err := k8sClient.Get(context.Background(), backupKey, updated)
+			err := testClient.Get(context.Background(), backupKey, updated)
 			if err != nil {
 				return false
 			}
@@ -229,10 +229,10 @@ var _ = Describe("CassandraBackup controller", func() {
 			},
 		}
 
-		Expect(k8sClient.Create(context.TODO(), restore)).To(Succeed())
+		Expect(testClient.Create(context.TODO(), restore)).To(Succeed())
 		Eventually(func() error {
 			created := &api.CassandraRestore{}
-			return k8sClient.Get(context.Background(), restoreKey, created)
+			return testClient.Get(context.Background(), restoreKey, created)
 		}, timeout, interval).Should(Succeed())
 
 		By("verifying a copy of the cluster was created")
@@ -243,7 +243,7 @@ var _ = Describe("CassandraBackup controller", func() {
 				Namespace: restoreKey.Namespace,
 			}
 
-			err := k8sClient.Get(context.Background(), cassDcRestoredKey, createdCassDc)
+			err := testClient.Get(context.Background(), cassDcRestoredKey, createdCassDc)
 			if err != nil {
 				return false
 			}
@@ -276,19 +276,19 @@ func createCassandraDatacenterPods(cassdc *cassdcapi.CassandraDatacenter) {
 				},
 			},
 		}
-		Expect(k8sClient.Create(context.Background(), pod)).Should(Succeed())
+		Expect(testClient.Create(context.Background(), pod)).Should(Succeed())
 		Eventually(func() bool {
 			created := &corev1.Pod{}
-			err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, created)
+			err := testClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, created)
 			return err == nil
 		}, timeout, interval).Should(BeTrue())
 
 		patch := client.MergeFrom(pod.DeepCopy())
 		pod.Status.PodIP = getPodIpAddress(int(i))
-		Expect(k8sClient.Status().Patch(context.Background(), pod, patch)).Should(Succeed())
+		Expect(testClient.Status().Patch(context.Background(), pod, patch)).Should(Succeed())
 		Eventually(func() bool {
 			updated := &corev1.Pod{}
-			err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, updated)
+			err := testClient.Get(context.Background(), types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}, updated)
 			if err != nil {
 				return false
 			}
