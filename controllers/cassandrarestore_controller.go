@@ -181,6 +181,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 				for _, rack := range cassdc.Spec.Racks {
 					racks = append(racks, rack.Name)
 				}
+				cassdc.Spec.ForceUpgradeRacks = racks
 
 				if err = r.Update(ctx, cassdc); err == nil {
 					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
