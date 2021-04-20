@@ -2,10 +2,8 @@ package e2e
 
 import (
 	"context"
-	"fmt"
+	"flag"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"math/rand"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +12,7 @@ import (
 	"github.com/k8ssandra/medusa-operator/test/framework"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/rand"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -34,46 +33,96 @@ type user struct {
 	Name  string
 }
 
-func TestBackupRestore(t *testing.T) {
-	namespaceBase := "medusa-dev"
+var (
+	cleanupBeforeTestGroup bool
+	cleanupAfterTestGroup  bool
+	truncateAfterTestGroup bool
+	runKustomize           bool
+)
+
+func init() {
+	flag.BoolVar(&cleanupBeforeTestGroup, "cleanup.beforeTestGroup", true,
+		"Deletes all objects in the namespace as well as the namespace before the test group is executed")
+	flag.BoolVar(&cleanupAfterTestGroup, "cleanup.afterTestGroup", true,
+		"Deletes all objects in the namespace as well as the namespace after the test group is executed")
+	flag.BoolVar(&truncateAfterTestGroup, "truncate.afterTestGroup", false,
+		"Truncates the table in Cassandra after the test group is executed. Ignored if cleanup.afterTestGroup is true.")
+	flag.BoolVar(&runKustomize, "runKustomize", true,
+		"Run kustomize build and apply generated manifests.")
+}
+
+func TestBackupInPlaceRestore(t *testing.T) {
 	storageTypes := []string{"s3", "gcs"}
 
 	for _, storageType := range storageTypes {
-		t.Run("["+storageType+"]BackupAndInPlaceRestore", newTest(namespaceBase, storageType))
+		t.Run(testName(storageType, "TestBase"), newTestBase(storageType))
 	}
 }
 
-func newTest(namespaceBase, storageType string) func(*testing.T) {
+func newTestBase(storageType string) func(*testing.T) {
 	return func(t *testing.T) {
-		namespace := namespaceBase + "-" + storageType
+		namespace := "medusa-test"
 
-		overlayDir, err := framework.GetKustomizeOverlayDir(storageType)
-		if err != nil {
-			t.Fatalf("failed to get kustomize overlay directory: %s", err)
+		cassandra := framework.NewCassandraSchemaManager(t, namespace)
+
+		if cleanupBeforeTestGroup {
+			if err := framework.Cleanup(t, namespace, datacenterName, retry15Sec, timeout3Min); err != nil {
+				t.Fatalf("failed to cleanup before test: %s", err)
+			}
 		}
 
-		if err := framework.Cleanup(t, namespace, datacenterName, retry15Sec, timeout3Min); err != nil {
-			t.Fatalf("failed to cleanup before test: %s", err)
+		prepareNamespace(t, storageType, namespace)
+		prepareSchema(t, cassandra)
+
+		if cleanupAfterTestGroup {
+			defer framework.Cleanup(t, namespace, datacenterName, retry15Sec, timeout3Min)
 		}
 
-		if err := framework.CreateNamespace(namespace); err != nil {
-			t.Fatalf("failed to create namespace: %s", err)
-		}
+		t.Run(testName(storageType, "BackUpInPlaceRestoreWithShutdown"), newBackupRestoreTest(storageType, namespace, cassandra, doBackupAndInPlaceRestore))
 
+		t.Run(testName(storageType, "BackupInPlaceRestoreWithoutShutdown"), noOpTest())
+
+		t.Run(testName(storageType, "BackupInPlaceRestoreAfterScaleUp"), noOpTest())
+	}
+}
+
+func testName(storageType, name string) string {
+	return "[" + storageType + "]" + name
+}
+
+type baseTest func(*testing.T)
+
+type backupRestoreTest func(t *testing.T, namespace string, cassandra *framework.CassandraSchemaManager)
+
+func newBackupRestoreTest(storageType, namespace string, cassandra *framework.CassandraSchemaManager, test backupRestoreTest) func(*testing.T) {
+	return func(t *testing.T) {
+		defer framework.DumpClusterInfo(t, storageType, namespace)
+		test(t, namespace, cassandra)
+	}
+}
+
+func noOpTest() baseTest {
+	return func(t *testing.T) {}
+}
+
+func prepareNamespace(t *testing.T, storageType, namespace string) {
+	overlayDir, err := framework.GetKustomizeOverlayDir(storageType)
+	if err != nil {
+		t.Fatalf("failed to get kustomize overlay directory: %s", err)
+	}
+
+	defer framework.DumpClusterInfoOnFailure(t, namespace, storageType)
+
+	if err := framework.CreateNamespace(namespace); err != nil {
+		t.Fatalf("failed to create namespace: %s", err)
+	}
+
+	if runKustomize {
 		t.Log("running kustomize and kubectl apply")
 		if err := framework.KustomizeAndApply(t, namespace, overlayDir, 3); err != nil {
 			t.Fatalf("failed to apply manifests: %s", err)
 		}
-
-		defer framework.DumpClusterInfo(t, namespace, storageType, "BackupAndInPlaceRestore")
-		defer framework.Cleanup(t, namespace, datacenterName, retry15Sec, timeout3Min)
-
-		doBackupAndInPlaceRestore(t, namespace)
 	}
-}
-
-func doBackupAndInPlaceRestore(t *testing.T, namespace string) {
-	ctx := context.Background()
 
 	storageSecretKey := types.NamespacedName{Namespace: namespace, Name: "medusa-bucket-key"}
 	if _, err := framework.GetSecret(t, storageSecretKey); err != nil {
@@ -100,26 +149,27 @@ func doBackupAndInPlaceRestore(t *testing.T, namespace string) {
 	if err := framework.WaitForCassandraDatacenterReady(t, key, retry15Sec, timeout7Min); err != nil {
 		t.Fatalf("timed out waiting for cassandradatacenter to become ready: %s", err)
 	}
+}
 
-	t.Log("creating keyspace")
-	if err := createKeyspace(t, namespace); err != nil {
+func prepareSchema(t *testing.T, cassandra *framework.CassandraSchemaManager) {
+	if err := cassandra.CreateKeyspace(); err != nil {
 		t.Fatalf("failed to create keyspace: %s", err)
 	}
 
-	t.Log("creating table")
-	if err := createTable(t, namespace); err != nil {
+	if err := cassandra.CreateUsersTable(); err != nil {
 		t.Fatalf("failed to create table: %s", err)
 	}
+}
 
-	t.Log("inserting rows")
-	users := []user{
+func doBackupAndInPlaceRestore(t *testing.T, namespace string, cassandra *framework.CassandraSchemaManager) {
+	ctx := context.Background()
+
+	users := []framework.User{
 		{Email: "john@test", Name: "John Doe"},
 		{Email: "jane@test", Name: "Jane Doe"},
 	}
-	if err := insertRows(t, namespace, users); err != nil {
-		// We use Errorf here because we can still try to test the backup and restore
-		// operations. Verification of the restored data will fail as well.
-		t.Errorf("failed to insert users: %s", err)
+	if err := cassandra.InsertRows(users); err != nil {
+		t.Fatalf("failed to insert users: %s", err)
 	}
 
 	backupKey := types.NamespacedName{Namespace: namespace, Name: "backup-" + randomSuffix(8)}
@@ -156,11 +206,11 @@ func doBackupAndInPlaceRestore(t *testing.T, namespace string) {
 	}
 
 	t.Logf("inserting more rows")
-	moreUsers := []user{
+	moreUsers := []framework.User{
 		{Email: "bob@test", Name: "Bob Smith"},
 		{Email: "mary@test", Name: "Mary Smith"},
 	}
-	if err := insertRows(t, namespace, moreUsers); err != nil {
+	if err := cassandra.InsertRows(moreUsers); err != nil {
 		t.Errorf("failed to insert more users: %s", err)
 	}
 
@@ -192,7 +242,7 @@ func doBackupAndInPlaceRestore(t *testing.T, namespace string) {
 	}
 
 	t.Log("checking for restored rows")
-	if matches, err := rowCountMatches(t, namespace, len(users)); err == nil {
+	if matches, err := cassandra.RowCountMatches(len(users)); err == nil {
 		if !matches {
 			t.Errorf("did not find the expected number of rows")
 		}
@@ -201,52 +251,6 @@ func doBackupAndInPlaceRestore(t *testing.T, namespace string) {
 	}
 }
 
-func createKeyspace(t *testing.T, namespace string) error {
-	cql := "create keyspace medusa_dev with replication = {'class': 'NetworkTopologyStrategy', 'dc1': 3}"
-	pod := "medusa-test-dc1-default-sts-0"
-
-	_, err := framework.ExecCqlsh(t, namespace, pod, cql)
-	return err
-}
-
-func createTable(t *testing.T, namespace string) error {
-	cql := "create table medusa_dev.users (email text primary key, name text)"
-	pod := "medusa-test-dc1-default-sts-0"
-
-	_, err := framework.ExecCqlsh(t, namespace, pod, cql)
-	return err
-}
-
-func insertRows(t *testing.T, namespace string, users []user) error {
-	pod := "medusa-test-dc1-default-sts-0"
-	for _, user := range users {
-		cql := fmt.Sprintf("insert into medusa_dev.users (email, name) values ('%s', '%s')", user.Email, user.Name)
-		if _, err := framework.ExecCqlsh(t, namespace, pod, cql); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func rowCountMatches(t *testing.T, namespace string, count int) (bool, error) {
-	pod := "medusa-test-dc1-default-sts-0"
-	cql := "select * from medusa_dev.users"
-
-	if output, err := framework.ExecCqlsh(t, namespace, pod, cql); err == nil {
-		return strings.Contains(output, strconv.Itoa(count)+" rows"), nil
-	} else {
-		return false, err
-	}
-}
-
-func randomSuffix(len int) string {
-	bytes := make([]byte, len)
-	for i := 0; i < len; i++ {
-		bytes[i] = byte(randomInt(65, 90))
-	}
-	return string(bytes)
-}
-
-func randomInt(min, max int) int {
-	return min + rand.Intn(max-min)
+func randomSuffix(length int) string {
+	return rand.String(length)
 }
