@@ -162,14 +162,46 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 			}
 		}
 
-		if err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
+		var podTemplateSpecUpdated bool
+		if podTemplateSpecUpdated, err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
 			r.Log.Error(err, "failed to set backup name in restore container", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
 
-		if err = setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, cassdc); err != nil {
+		if podTemplateSpecUpdated, err = setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, cassdc); err != nil {
 			r.Log.Error(err, "failed to set restore key in restore container", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
+		if restore.Spec.Shutdown {
+			// cass-operator does not apply updates to the StatefulSet's template spec until
+			// pods are ready. This means that when we shutdown and update the template spec
+			// with the backup name and the restore key, cass-operator first scales the
+			// StatefulSet back up and then only after the pods are ready does it update the
+			// template spec. This results in a StatefulSet update which has the effect of a
+			// cluster rolling restart. The following if block is a work around to avoid that
+			// rolling restart.
+			if podTemplateSpecUpdated {
+				racks := make([]string, 0)
+				for _, rack := range cassdc.Spec.Racks {
+					racks = append(racks, rack.Name)
+				}
+				cassdc.Spec.ForceUpgradeRacks = racks
+
+				r.Log.Info("updating racks", "CassandraDatacenter", cassdcKey, "Racks", cassdc.Spec.ForceUpgradeRacks)
+
+				if err = r.Update(ctx, cassdc); err == nil {
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				} else {
+					r.Log.Error(err, "failed to force update racks", "CassandraDatacenter", cassdcKey)
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+				}
+			} else {
+				if isCassdcUpdating(cassdc) {
+					r.Log.Info("waiting for rack updates to complete", "CassandraDatacenter", cassdcKey)
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				}
+			}
 		}
 
 		patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
@@ -238,55 +270,61 @@ func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.Cass
 		Spec: backup.Status.CassdcTemplateSpec.Spec,
 	}
 
-	if err := setBackupNameInRestoreContainer(backup.Spec.Name, newCassdc); err != nil {
+	if _, err := setBackupNameInRestoreContainer(backup.Spec.Name, newCassdc); err != nil {
 		return nil, err
 	}
 
-	if err := setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, newCassdc); err != nil {
+	if _, err := setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, newCassdc); err != nil {
 		return nil, err
 	}
 
 	return newCassdc, nil
 }
 
-func setBackupNameInRestoreContainer(backupName string, cassdc *cassdcapi.CassandraDatacenter) error {
+func setBackupNameInRestoreContainer(backupName string, cassdc *cassdcapi.CassandraDatacenter) (bool, error) {
 	index, err := getRestoreInitContainerIndex(cassdc)
 	if err != nil {
-		return err
+		return false, err
 	}
 
+	updated := false
 	restoreContainer := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
 	envVars := restoreContainer.Env
 	envVarIdx := getEnvVarIndex("BACKUP_NAME", envVars)
 
 	if envVarIdx > -1 {
+		updated = envVars[envVarIdx].Value != backupName
 		envVars[envVarIdx].Value = backupName
 	} else {
 		envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backupName})
+		updated = true
 	}
 	restoreContainer.Env = envVars
 
-	return nil
+	return updated, nil
 }
 
-func setRestoreKeyInRestoreContainer(restoreKey string, cassdc *cassdcapi.CassandraDatacenter) error {
+func setRestoreKeyInRestoreContainer(restoreKey string, cassdc *cassdcapi.CassandraDatacenter) (bool, error) {
 	index, err := getRestoreInitContainerIndex(cassdc)
 	if err != nil {
-		return err
+		return false, err
 	}
 
+	updated := false
 	restoreContainer := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
 	envVars := restoreContainer.Env
 	envVarIdx := getEnvVarIndex("RESTORE_KEY", envVars)
 
 	if envVarIdx > -1 {
+		updated = envVars[envVarIdx].Value != restoreKey
 		envVars[envVarIdx].Value = restoreKey
 	} else {
 		envVars = append(envVars, corev1.EnvVar{Name: "RESTORE_KEY", Value: restoreKey})
+		updated = true
 	}
 	restoreContainer.Env = envVars
 
-	return nil
+	return updated, nil
 }
 
 func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, error) {
@@ -326,6 +364,11 @@ func isCassdcReady(cassdc *cassdcapi.CassandraDatacenter) bool {
 
 	statusReady := cassdc.GetConditionStatus(cassdcapi.DatacenterReady)
 	return statusReady == corev1.ConditionTrue
+}
+
+func isCassdcUpdating(cassdc *cassdcapi.CassandraDatacenter) bool {
+	statusUpdating := cassdc.GetConditionStatus(cassdcapi.DatacenterUpdating)
+	return statusUpdating == corev1.ConditionTrue && cassdc.Status.CassandraOperatorProgress == cassdcapi.ProgressUpdating
 }
 
 func (r *CassandraRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
