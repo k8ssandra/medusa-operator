@@ -285,6 +285,7 @@ func setBackupNameInRestoreContainer(backupName string, cassdc *cassdcapi.Cassan
 	envVarIdx := getEnvVarIndex("BACKUP_NAME", envVars)
 
 	if envVarIdx > -1 {
+		updated = envVars[envVarIdx].Value != backupName
 		envVars[envVarIdx].Value = backupName
 	} else {
 		envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backupName})
@@ -307,6 +308,7 @@ func setRestoreKeyInRestoreContainer(restoreKey string, cassdc *cassdcapi.Cassan
 	envVarIdx := getEnvVarIndex("RESTORE_KEY", envVars)
 
 	if envVarIdx > -1 {
+		updated = envVars[envVarIdx].Value != restoreKey
 		envVars[envVarIdx].Value = restoreKey
 	} else {
 		envVars = append(envVars, corev1.EnvVar{Name: "RESTORE_KEY", Value: restoreKey})
