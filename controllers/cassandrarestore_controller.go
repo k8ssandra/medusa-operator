@@ -174,14 +174,21 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		}
 
 		if restore.Spec.Shutdown {
+			// cass-operator does not apply updates to the StatefulSet's template spec until
+			// pods are ready. This means that when we shutdown and update the template spec
+			// with the backup name and the restore key, cass-operator first scales the
+			// StatefulSet back up and then only after the pods are ready does it update the
+			// template spec. This results in a StatefulSet update which has the effect of a
+			// cluster rolling restart. The following if block is a work around to avoid that
+			// rolling restart.
 			if podTemplateSpecUpdated {
-				r.Log.Info("updating racks", "CassandraDatacenter", cassdcKey)
-
 				racks := make([]string, 0)
 				for _, rack := range cassdc.Spec.Racks {
 					racks = append(racks, rack.Name)
 				}
 				cassdc.Spec.ForceUpgradeRacks = racks
+
+				r.Log.Info("updating racks", "CassandraDatacenter", cassdcKey, "Racks", cassdc.Spec.ForceUpgradeRacks)
 
 				if err = r.Update(ctx, cassdc); err == nil {
 					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
