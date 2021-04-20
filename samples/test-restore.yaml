@@ -1,11 +1,11 @@
 apiVersion: cassandra.k8ssandra.io/v1alpha1
 kind: CassandraRestore
 metadata:
-  name: test
+  name: test-1
 spec:
-  backup: test-backup
+  backup: test-1
   inPlace: true
-  shutdown: false
+  shutdown: true
   cassandraDatacenter:
     name: dc1
     # The CRD currently requires clusterName but the operator uses reuses the cluster name
