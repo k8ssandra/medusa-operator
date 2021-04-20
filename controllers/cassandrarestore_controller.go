@@ -173,13 +173,6 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
 
-		patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		restore.Status.StartTime = metav1.Now()
-		if err = r.Status().Patch(ctx, restore, patch); err != nil {
-			r.Log.Error(err, "fail to patch status with start time")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-		}
-
 		if restore.Spec.Shutdown {
 			if podTemplateSpecUpdated {
 				r.Log.Info("updating racks", "CassandraDatacenter", cassdcKey)
@@ -201,7 +194,16 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 				}
 			}
+		}
 
+		patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		restore.Status.StartTime = metav1.Now()
+		if err = r.Status().Patch(ctx, restore, patch); err != nil {
+			r.Log.Error(err, "fail to patch status with start time")
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
+		}
+
+		if restore.Spec.Shutdown {
 			// Restart the cluster
 			cassdc.Spec.Stopped = false
 			r.Log.Info("restarting the CassandraDatacenter", "CassandraDatacenter", cassdcKey)
