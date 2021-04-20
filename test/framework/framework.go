@@ -3,17 +3,20 @@ package framework
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"github.com/gruntwork-io/terratest/modules/logger"
+	"github.com/gruntwork-io/terratest/modules/shell"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	cassdcv1beta1 "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	"github.com/gruntwork-io/terratest/modules/k8s"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
-	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -69,27 +72,32 @@ func createClient() client.Client {
 	return cl
 }
 
+func GetKustomizeOverlayDir(storageType string) (string, error) {
+	var overlayDir string
+
+	path, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	if overlay, found := os.LookupEnv("TEST_OVERLAY"); found {
+		overlayDir = filepath.Clean(overlay)
+	} else {
+		overlayDir = filepath.Clean(path + "/../config/dev/")
+	}
+
+	return filepath.Join(overlayDir, storageType), nil
+}
+
 // Runs kustomize build followed kubectl apply. dir specifies the name of a test directory.
 // By default this function will run kustomize build on dir/overlays/k8ssandra. This will
 // result in using upstream operator images. If you are testing against a fork, then set
 // the TEST_OVERLAY environment variable to specify the fork overlay to use. When
 // TEST_OVERLAY is set this function will run kustomize build on
 // dir/overlays/forks/TEST_OVERLAY which will allow you to use a custom operator image.
-func KustomizeAndApply(t *testing.T, namespace, dir string, retries int) error {
-	kustomizeDir := ""
+func KustomizeAndApply(t *testing.T, namespace, kustomizeDir string, retries int) error {
+	var err error
 
-	path, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	if overlay, found := os.LookupEnv("TEST_OVERLAY"); found {
-		kustomizeDir = overlay
-	} else {
-		kustomizeDir = filepath.Clean(path + "/../config/" + dir)
-	}
-
-	err = nil
 	for i := 0; i < retries; i++ {
 		kustomize := exec.Command("kustomize", "build", kustomizeDir)
 		var stdout, stderr bytes.Buffer
@@ -98,6 +106,7 @@ func KustomizeAndApply(t *testing.T, namespace, dir string, retries int) error {
 		err = kustomize.Run()
 
 		if err != nil {
+			t.Log(kustomize.Stderr)
 			t.Logf("kustomize build failed: %s", err)
 			continue
 		}
@@ -114,6 +123,52 @@ func KustomizeAndApply(t *testing.T, namespace, dir string, retries int) error {
 		}
 	}
 
+	return err
+}
+
+func DumpClusterInfoOnFailure(t *testing.T, namespace, storageType string) error {
+	if t.Failed() {
+		return DumpClusterInfo(t, namespace, storageType)
+	}
+	return nil
+}
+
+func DumpClusterInfo(t *testing.T, storageType, namespace string) error {
+	if err := DumpClusterInfoE(t, storageType, namespace); err != nil {
+		t.Logf("failed to dump cluster info: %s", err)
+		return err
+	}
+	return nil
+}
+
+func DumpClusterInfoE(t *testing.T, storageType, namespace string) error {
+	t.Logf("dumping cluster info")
+
+	segments := strings.Split(t.Name(), "/")
+	segment := segments[len(segments) - 1]
+	tag := "[" + storageType + "]"
+	testName := segment[len(tag):]
+
+	outputDir := "../../build/test/" + storageType + "/" + testName
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create test output directory %s: %s", outputDir, err)
+	}
+
+	cmd := shell.Command{
+		Command: "kubectl",
+		Args: []string{
+			"cluster-info",
+			"dump",
+			"--namespaces",
+			namespace,
+			"-o",
+			"yaml",
+			"--output-directory",
+			outputDir,
+		},
+		Logger: logger.Discard,
+	}
+	_, err := shell.RunCommandAndGetOutputE(t, cmd)
 	return err
 }
 
@@ -180,7 +235,13 @@ func CreateNamespace(name string) error {
 			Name: name,
 		},
 	}
-	return Client.Create(context.Background(), namespace)
+	if err := Client.Create(context.Background(), namespace); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func DeleteNamespaceSync(t *testing.T, name string, retryInterval, timeout time.Duration) error {
@@ -224,7 +285,7 @@ func DeleteNamespaceSync(t *testing.T, name string, retryInterval, timeout time.
 // is determined by the Ready condition in the CassandraDatacenter status. An error is
 // returned if fetching the CassandraDatacenter fails.
 func WaitForCassandraDatacenterReady(t *testing.T, key types.NamespacedName, retryInterval, timeout time.Duration) error {
-	start := time.Now()
+	//start := time.Now()
 	return wait.PollImmediate(retryInterval, timeout, func() (bool, error) {
 		cassdc, err := GetCassandraDatacenter(key)
 		if err != nil {
@@ -235,7 +296,7 @@ func WaitForCassandraDatacenterReady(t *testing.T, key types.NamespacedName, ret
 			t.Logf("failed to get cassandradatacenter %s: %s", key, err)
 			return true, err
 		}
-		logCassDcStatus(t, cassdc, start)
+		//logCassDcStatus(t, cassdc, start)
 		status := cassdc.GetConditionStatus(cassdcv1beta1.DatacenterReady)
 		return status == corev1.ConditionTrue, nil
 	})
@@ -277,16 +338,6 @@ func DeleteCassandraDatacenterSync(t *testing.T, key types.NamespacedName, retry
 
 		return false, err
 	})
-}
-
-func logCassDcStatus(t *testing.T, cassdc *cassdcv1beta1.CassandraDatacenter, start time.Time) {
-	if d, err := yaml.Marshal(cassdc.Status); err == nil {
-		duration := time.Now().Sub(start)
-		sec := int(duration.Seconds())
-		t.Logf("cassandradatacenter status after %d sec...\n%s\n\n", sec, string(d))
-	} else {
-		t.Logf("failed to log cassandradatacenter status: %s", err)
-	}
 }
 
 func WaitForBackupToFinish(key types.NamespacedName, retryInterval, timeout time.Duration) error {

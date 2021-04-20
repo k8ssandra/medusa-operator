@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,11 +20,13 @@ import (
 )
 
 const (
-	timeout3Min = 3 * time.Minute
-	timeout7Min = 7 * time.Minute
+	timeout3Min  = 3 * time.Minute
+	timeout7Min  = 7 * time.Minute
 	timeout15Min = 15 * time.Minute
-	retry15Sec = 15 * time.Second
-	retry45Sec = 45 * time.Second
+	retry15Sec   = 15 * time.Second
+	retry45Sec   = 45 * time.Second
+
+	datacenterName = "dc1"
 )
 
 type user struct {
@@ -31,39 +34,52 @@ type user struct {
 	Name  string
 }
 
-func TestBackupAndInPlaceRestore(t *testing.T) {
-	namespace := "medusa-dev"
-	ctx := context.Background()
+func TestBackupRestore(t *testing.T) {
+	namespaceBase := "medusa-dev"
+	storageTypes := []string{"s3", "gcs"}
 
-	// TODO make this configurable
-	s3Bucket := "k8ssandra-medusa-dev"
+	for _, storageType := range storageTypes {
+		t.Run("["+storageType+"]BackupAndInPlaceRestore", newTest(namespaceBase, storageType))
+	}
+}
 
-	if bucketCleaner, err := framework.NewBucketObjectDeleter("aws"); err == nil {
-		if _, err := bucketCleaner.DeleteObjects(t, s3Bucket); err != nil {
-			t.Logf("failed to delete objects from s3 bucket %s: %s", s3Bucket, err)
+func newTest(namespaceBase, storageType string) func(*testing.T) {
+	return func(t *testing.T) {
+		namespace := namespaceBase + "-" + storageType
+
+		overlayDir, err := framework.GetKustomizeOverlayDir(storageType)
+		if err != nil {
+			t.Fatalf("failed to get kustomize overlay directory: %s", err)
 		}
-	} else {
-		t.Logf("failed to create BucketObjectDeleter: %s", err)
-	}
 
-	if err := framework.Cleanup(t, namespace, "dc1", retry15Sec, timeout3Min); err != nil {
-		t.Fatalf("failed to cleanup before test: %s", err)
-	}
+		if err := framework.Cleanup(t, namespace, datacenterName, retry15Sec, timeout3Min); err != nil {
+			t.Fatalf("failed to cleanup before test: %s", err)
+		}
 
-	if err := framework.CreateNamespace(namespace); err != nil {
-		t.Fatalf("failed to create namespace: %s", err)
-	}
+		if err := framework.CreateNamespace(namespace); err != nil {
+			t.Fatalf("failed to create namespace: %s", err)
+		}
 
-	t.Log("running kustomize and kubectl apply")
-	if err := framework.KustomizeAndApply(t, namespace, "dev/s3", 3); err != nil {
-		t.Fatalf("failed to apply manifests: %s", err)
+		t.Log("running kustomize and kubectl apply")
+		if err := framework.KustomizeAndApply(t, namespace, overlayDir, 3); err != nil {
+			t.Fatalf("failed to apply manifests: %s", err)
+		}
+
+		defer framework.DumpClusterInfo(t, namespace, storageType, "BackupAndInPlaceRestore")
+		defer framework.Cleanup(t, namespace, datacenterName, retry15Sec, timeout3Min)
+
+		doBackupAndInPlaceRestore(t, namespace)
 	}
+}
+
+func doBackupAndInPlaceRestore(t *testing.T, namespace string) {
+	ctx := context.Background()
 
 	storageSecretKey := types.NamespacedName{Namespace: namespace, Name: "medusa-bucket-key"}
 	if _, err := framework.GetSecret(t, storageSecretKey); err != nil {
 		if apierrors.IsNotFound(err) {
 			t.Fatalf("storage secret %s not found", storageSecretKey)
-		}  else {
+		} else {
 			t.Fatalf("failed to get storage secret %s: %s", storageSecretKey, err)
 		}
 	}
@@ -78,7 +94,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 		t.Fatalf("timed out waiting for medusa-operator to become ready: %s", err)
 	}
 
-	key := types.NamespacedName{Namespace: namespace, Name: "dc1"}
+	key := types.NamespacedName{Namespace: namespace, Name: datacenterName}
 
 	t.Logf("waiting for cassandradatacenter to become ready")
 	if err := framework.WaitForCassandraDatacenterReady(t, key, retry15Sec, timeout7Min); err != nil {
@@ -106,8 +122,10 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 		t.Errorf("failed to insert users: %s", err)
 	}
 
-	t.Logf("creating a cassandrabackup")
-	backupKey := types.NamespacedName{Namespace: namespace, Name: "test-backup"}
+	backupKey := types.NamespacedName{Namespace: namespace, Name: "backup-" + randomSuffix(8)}
+
+	t.Logf("creating a cassandrabackup %s", backupKey.Name)
+
 	backup := &api.CassandraBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: backupKey.Namespace,
@@ -115,7 +133,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 		},
 		Spec: api.CassandraBackupSpec{
 			Name:                backupKey.Name,
-			CassandraDatacenter: "dc1",
+			CassandraDatacenter: datacenterName,
 		},
 	}
 
@@ -124,7 +142,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	}
 
 	t.Logf("waiting for cassandrabackup %s to finish", backupKey)
-	if err := framework.WaitForBackupToFinish(types.NamespacedName{Namespace: namespace, Name: "test-backup"}, retry15Sec, timeout7Min); err != nil {
+	if err := framework.WaitForBackupToFinish(backupKey, retry15Sec, timeout7Min); err != nil {
 		t.Fatalf("timed out waiting for backup %s to finish", backupKey)
 	}
 
@@ -147,7 +165,7 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 	}
 
 	t.Logf("creating a cassandrarestore")
-	restoreKey := types.NamespacedName{Namespace: namespace, Name: "test-restore"}
+	restoreKey := types.NamespacedName{Namespace: namespace, Name: "restore-" + backupKey.Name}
 	restore := &api.CassandraRestore{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: restoreKey.Namespace,
@@ -156,8 +174,9 @@ func TestBackupAndInPlaceRestore(t *testing.T) {
 		Spec: api.CassandraRestoreSpec{
 			Backup:  backupKey.Name,
 			InPlace: true,
+			Shutdown: true,
 			CassandraDatacenter: api.CassandraDatacenterConfig{
-				Name:        "dc1",
+				Name:        datacenterName,
 				ClusterName: "medusa-test",
 			},
 		},
@@ -218,4 +237,16 @@ func rowCountMatches(t *testing.T, namespace string, count int) (bool, error) {
 	} else {
 		return false, err
 	}
+}
+
+func randomSuffix(len int) string {
+	bytes := make([]byte, len)
+	for i := 0; i < len; i++ {
+		bytes[i] = byte(randomInt(65, 90))
+	}
+	return string(bytes)
+}
+
+func randomInt(min, max int) int {
+	return min + rand.Intn(max-min)
 }
