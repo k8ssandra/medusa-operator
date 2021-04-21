@@ -19,9 +19,8 @@ spec:
         - /manager
         args:
         - --enable-leader-election
-        image: controller:latest
+        image: k8ssandra/medusa-operator:latest
         name: manager
-        imagePullPolicy: Always
         env:
           - name: WATCH_NAMESPACE
             valueFrom:

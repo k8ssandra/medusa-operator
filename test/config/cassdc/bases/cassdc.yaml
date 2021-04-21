@@ -7,6 +7,8 @@ spec:
   serverType: cassandra
   serverVersion: 3.11.10
   serverImage: datastax/cassandra-mgmtapi-3_11_10:v0.1.23
+  # Disable logging sidecar due to https://github.com/datastax/cass-operator/issues/325
+  disableSystemLoggerSidecar: true
   dockerImageRunsAsCassandra: true
   managementApiAuth:
     insecure: {}
@@ -50,7 +52,7 @@ spec:
           name: server-config
       - name: medusa-restore
         image: docker.io/k8ssandra/medusa:0.9.1
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         env:
         - name: MEDUSA_MODE
           value: RESTORE
@@ -73,7 +75,7 @@ spec:
           mountPath: /etc/cassandra
       - name: medusa
         image: docker.io/k8ssandra/medusa:0.9.1
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 50051
         env:

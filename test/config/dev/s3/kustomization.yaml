@@ -1,3 +1,5 @@
+namespace: medusa-dev-s3
+
 resources:
 - ../bases
 - ../../cassdc/s3
