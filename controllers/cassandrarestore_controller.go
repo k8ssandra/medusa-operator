@@ -202,11 +202,11 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 				r.Log.Error(err, "failed to force update racks", "CassandraDatacenter", cassdcKey)
 				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-			} else {
-				if isCassdcUpdating(cassdc) {
-					r.Log.Info("waiting for rack updates to complete", "CassandraDatacenter", cassdcKey)
-					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-				}
+			}
+
+			if isCassdcUpdating(cassdc) {
+				r.Log.Info("waiting for rack updates to complete", "CassandraDatacenter", cassdcKey)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			}
 		}
 
