@@ -18,7 +18,10 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"k8s.io/kubernetes/pkg/util/hash"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -162,6 +165,8 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 			}
 		}
 
+		beforeHash := deepHashString(cassdc.Spec.PodTemplateSpec)
+
 		if err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
 			r.Log.Error(err, "failed to set backup name in restore container", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
@@ -170,6 +175,39 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 		if err = setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, cassdc); err != nil {
 			r.Log.Error(err, "failed to set restore key in restore container", "CassandraDatacenter", cassdcKey)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
+		afterHash := deepHashString(cassdc.Spec.PodTemplateSpec)
+
+		if restore.Spec.Shutdown {
+			// cass-operator does not apply updates to the StatefulSet's template spec until
+			// pods are ready. This means that when we shutdown and update the template spec
+			// with the backup name and the restore key, cass-operator first scales the
+			// StatefulSet back up and then only after the pods are ready does it update the
+			// template spec. This results in a StatefulSet update which has the effect of a
+			// cluster rolling restart. The following if block is a work around to avoid that
+			// rolling restart.
+			if beforeHash != afterHash {
+				racks := make([]string, 0, len(cassdc.Spec.Racks))
+				for _, rack := range cassdc.Spec.Racks {
+					racks = append(racks, rack.Name)
+				}
+				cassdc.Spec.ForceUpgradeRacks = racks
+
+				r.Log.Info("updating racks", "CassandraDatacenter", cassdcKey, "Racks", cassdc.Spec.ForceUpgradeRacks)
+
+				if err = r.Update(ctx, cassdc); err == nil {
+					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+				}
+
+				r.Log.Error(err, "failed to force update racks", "CassandraDatacenter", cassdcKey)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+			}
+
+			if isCassdcUpdating(cassdc) {
+				r.Log.Info("waiting for rack updates to complete", "CassandraDatacenter", cassdcKey)
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
 		}
 
 		patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
@@ -328,8 +366,21 @@ func isCassdcReady(cassdc *cassdcapi.CassandraDatacenter) bool {
 	return statusReady == corev1.ConditionTrue
 }
 
+func isCassdcUpdating(cassdc *cassdcapi.CassandraDatacenter) bool {
+	statusUpdating := cassdc.GetConditionStatus(cassdcapi.DatacenterUpdating)
+	return statusUpdating == corev1.ConditionTrue && cassdc.Status.CassandraOperatorProgress == cassdcapi.ProgressUpdating
+}
+
 func (r *CassandraRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&api.CassandraRestore{}).
 		Complete(r)
+}
+
+func deepHashString(obj interface{}) string {
+	hasher := sha256.New()
+	hash.DeepHashObject(hasher, obj)
+	hashBytes := hasher.Sum([]byte{})
+	b64Hash := base64.StdEncoding.EncodeToString(hashBytes)
+	return b64Hash
 }
