@@ -9,6 +9,9 @@ Changelog for medusa-operator. New PRs should update the `master / unreleased` s
 * [BUGFIX]
 ```
 
+## v0.3.1
+* [BUGFIX] #42 Fix CRD version upgrade
+
 ## v0.3.0
 * [CHANGE] #39 Upgrade to cass-operator 1.7.0
 
