@@ -3,10 +3,10 @@ module github.com/k8ssandra/medusa-operator
 go 1.15
 
 require (
-	github.com/datastax/cass-operator v1.6.0
 	github.com/go-logr/logr v0.1.0
-	github.com/golang/protobuf v1.4.3
+	github.com/golang/protobuf v1.4.3 // indirect
 	github.com/google/uuid v1.1.2
+	github.com/k8ssandra/cass-operator v1.7.0
 	github.com/onsi/ginkgo v1.12.1
 	github.com/onsi/gomega v1.10.1
 	golang.org/x/net v0.0.0-20201209123823-ac852fbbde11 // indirect
@@ -18,7 +18,7 @@ require (
 	k8s.io/api v0.18.6
 	k8s.io/apimachinery v0.18.6
 	k8s.io/client-go v12.0.0+incompatible
-	k8s.io/kubernetes v1.18.6 // indirect
+	k8s.io/kubernetes v1.18.6
 	sigs.k8s.io/controller-runtime v0.6.5
 )
 
