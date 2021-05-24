@@ -59,9 +59,12 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	ctx := context.Background()
 	_ = r.Log.WithValues("cassandrabackup", req.NamespacedName)
 
+	r.Log.Info("Starting reconciliation")
+
 	instance := &api.CassandraBackup{}
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
+		r.Log.Error(err, "Failed to get CassandraBackup")
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
@@ -78,6 +81,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 	// If the backup is already finished, there is nothing to do.
 	if backupFinished(backup) {
+		r.Log.Info("Backup operation is already finished")
 		return ctrl.Result{Requeue: false}, nil
 	}
 
@@ -85,6 +89,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	if !backup.Status.StartTime.IsZero() {
 		// If there is anything in progress, simply requeue the request
 		if len(backup.Status.InProgress) > 0 {
+			r.Log.Info("Backups already in progress")
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 
@@ -103,6 +108,8 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		return ctrl.Result{Requeue: false}, nil
 	}
 
+	r.Log.Info("Backups have not been started yet")
+
 	cassdcKey := types.NamespacedName{Namespace: backup.Namespace, Name: backup.Spec.CassandraDatacenter}
 	cassdc := &cassdcapi.CassandraDatacenter{}
 	err = r.Get(ctx, cassdcKey, cassdc)
@@ -113,6 +120,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 
 	pods, err := r.getCassandraDatacenterPods(ctx, cassdc)
 	if err != nil {
+		r.Log.Error(err, "Failed to get datacenter pods")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
@@ -133,11 +141,14 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 	for _, pod := range pods {
 		backup.Status.InProgress = append(backup.Status.InProgress, pod.Name)
 	}
+	r.Log.Info("checking status", "CassandraDatacenterTemplateSpec", backup.Status.CassdcTemplateSpec)
 	if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
+		r.Log.Error(err, "Failed to patch status")
 		// We received a stale object, requeue for next processing
 		return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, nil
 	}
 
+	r.Log.Info("Starting backups")
 	// Do the actual backup in the background
 	go func() {
 		wg := sync.WaitGroup{}
@@ -170,6 +181,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 			}()
 		}
 		wg.Wait()
+		r.Log.Info("finished backup operations")
 		if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
 			r.Log.Error(err, "failed to patch status", "Backup", fmt.Sprintf("%s/%s", backup.Name, backup.Namespace))
 		}
@@ -221,7 +233,7 @@ func (r *CassandraBackupReconciler) addCassdcSpecToStatus(ctx context.Context, b
 		},
 	}
 
-	backup.Status.CassdcTemplateSpec = templateSpec
+	backup.Status.CassdcTemplateSpec = &templateSpec
 	return nil
 }
 
