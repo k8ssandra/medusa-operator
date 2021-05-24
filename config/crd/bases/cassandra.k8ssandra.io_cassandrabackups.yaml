@@ -4213,8 +4213,6 @@ spec:
               startTime:
                 format: date-time
                 type: string
-            required:
-            - cassdcTemplateSpec
             type: object
         type: object
     served: true

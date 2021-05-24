@@ -1,18 +1,18 @@
 [
   {
     "op": "remove",
-    "path": "/spec/validation/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/config"
+    "path": "/spec/versions/0/schema/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/config"
   },
   {
     "op": "remove",
-    "path": "/spec/validation/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/podTemplateSpec/properties/spec/properties/containers/items/properties/ports"
+    "path": "/spec/versions/0/schema/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/podTemplateSpec/properties/spec/properties/containers/items/properties/ports"
   },
   {
     "op": "remove",
-    "path": "/spec/validation/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/podTemplateSpec/properties/spec/properties/initContainers/items/properties/ports"
+    "path": "/spec/versions/0/schema/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/podTemplateSpec/properties/spec/properties/initContainers/items/properties/ports"
   },
   {
     "op": "remove",
-    "path": "/spec/validation/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/podTemplateSpec/properties/spec/properties/topologySpreadConstraints"
+    "path": "/spec/versions/0/schema/openAPIV3Schema/properties/status/properties/cassdcTemplateSpec/properties/spec/properties/podTemplateSpec/properties/spec/properties/topologySpreadConstraints"
   }
 ]

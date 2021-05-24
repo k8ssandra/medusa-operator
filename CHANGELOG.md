@@ -9,6 +9,9 @@ Changelog for medusa-operator. New PRs should update the `master / unreleased` s
 * [BUGFIX]
 ```
 
+## v0.3.2
+* [BUGFIX] #44 Fix JSON patch script for CRD
+
 ## v0.3.1
 * [BUGFIX] #42 Fix CRD version upgrade
 

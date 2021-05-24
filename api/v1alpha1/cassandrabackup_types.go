@@ -44,7 +44,7 @@ type CassandraDatacenterTemplateSpec struct {
 
 // CassandraBackupStatus defines the observed state of CassandraBackup
 type CassandraBackupStatus struct {
-	CassdcTemplateSpec CassandraDatacenterTemplateSpec `json:"cassdcTemplateSpec"`
+	CassdcTemplateSpec *CassandraDatacenterTemplateSpec `json:"cassdcTemplateSpec,omitempty"`
 
 	StartTime metav1.Time `json:"startTime,omitempty"`
 
