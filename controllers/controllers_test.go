@@ -43,6 +43,8 @@ func TestControllers(t *testing.T) {
 }
 
 func beforeSuite(t *testing.T) {
+	require := require.New(t)
+
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "build", "config", "crds")},
@@ -50,14 +52,14 @@ func beforeSuite(t *testing.T) {
 
 	var err error
 	cfg, err = testEnv.Start()
-	require.NoError(t, err, "failed to start test environment")
+	require.NoError(err, "failed to start test environment")
 
-	require.NoError(t, registerApis(), "failed to register apis with scheme")
+	require.NoError(registerApis(), "failed to register apis with scheme")
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
-	require.NoError(t, err, "failed to create controller-runtime manager")
+	require.NoError(err, "failed to create controller-runtime manager")
 
 	medusaClientFactory = NewMedusaClientFactory()
 
@@ -71,14 +73,14 @@ func beforeSuite(t *testing.T) {
 		Scheme:        scheme.Scheme,
 		ClientFactory: medusaClientFactory,
 	}).SetupWithManager(k8sManager)
-	require.NoError(t, err, "failed to set up CassandraBackupReconciler")
+	require.NoError(err, "failed to set up CassandraBackupReconciler")
 
 	err = (&CassandraRestoreReconciler{
 		Client: k8sManager.GetClient(),
 		Log:    log.WithName("controllers").WithName("CassandraRestore"),
 		Scheme: scheme.Scheme,
 	}).SetupWithManager(k8sManager)
-	require.NoError(t, err, "failed to set up CassandraRestoreReconciler")
+	require.NoError(err, "failed to set up CassandraRestoreReconciler")
 
 	go func() {
 		err = k8sManager.Start(ctrl.SetupSignalHandler())
@@ -86,7 +88,7 @@ func beforeSuite(t *testing.T) {
 	}()
 
 	testClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	require.NoError(t, err, "failed to create controller-runtime client")
+	require.NoError(err, "failed to create controller-runtime client")
 }
 
 func registerApis() error {

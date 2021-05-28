@@ -20,6 +20,9 @@ import (
 )
 
 func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
+	assert := assert.New(t)
+	require := require.New(t)
+
 	backupName := "test-backup"
 
 	dcKey := types.NamespacedName{
@@ -70,7 +73,7 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 	t.Logf("creating datacenter %s", dcKey)
 
 	err := testClient.Create(ctx, dc)
-	assert.NoError(t, err, "failed to create datacenter")
+	assert.NoError(err, "failed to create datacenter")
 
 	t.Logf("creating datacenter service")
 
@@ -93,7 +96,7 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 		},
 	}
 	err = testClient.Create(ctx, dcService)
-	assert.NoError(t, err, "failed to create datacenter service %s", dcServiceKey)
+	assert.NoError(err, "failed to create datacenter service %s", dcServiceKey)
 
 	t.Log("creating datacenter pods")
 	createDatacenterPods(t, ctx, dc)
@@ -108,7 +111,7 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 		},
 	}
 	err = testClient.Status().Patch(context.Background(), dc, patch)
-	assert.NoError(t, err, "failed to make datacenter ready")
+	assert.NoError(err, "failed to make datacenter ready")
 
 	t.Log("creating CassandraBackup")
 	backupKey := types.NamespacedName{Namespace: namespace, Name: backupName}
@@ -124,10 +127,10 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 	}
 
 	err = testClient.Create(ctx, backup)
-	assert.NoError(t, err, "failed to create CassandraBackup")
+	assert.NoError(err, "failed to create CassandraBackup")
 
 	t.Log("verify that the backups are started")
-	require.Eventually(t, func() bool {
+	require.Eventually(func() bool {
 		updated := &api.CassandraBackup{}
 		err := testClient.Get(context.Background(), backupKey, updated)
 		if err != nil {
@@ -137,7 +140,7 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 	}, timeout, interval)
 
 	t.Log("verify that the CassandraDatacenter spec is added to the backup status")
-	require.Eventually(t, func() bool {
+	require.Eventually(func() bool {
 		updated := &api.CassandraBackup{}
 		err := testClient.Get(context.Background(), backupKey, updated)
 		if err != nil {
@@ -166,7 +169,7 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 	}, timeout, interval)
 
 	t.Log("verify the backup finished")
-	require.Eventually(t, func() bool {
+	require.Eventually(func() bool {
 		updated := &api.CassandraBackup{}
 		err := testClient.Get(context.Background(), backupKey, updated)
 		if err != nil {
@@ -176,7 +179,7 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 	}, timeout, interval)
 
 	t.Log("verify that medusa gRPC clients are invoked")
-	assert.Equal(t, medusaClientFactory.GetRequestedBackups(), map[string][]string{
+	assert.Equal(medusaClientFactory.GetRequestedBackups(), map[string][]string{
 		fmt.Sprintf("%s:%d", getPodIpAddress(0), backupSidecarPort): {backupName},
 		fmt.Sprintf("%s:%d", getPodIpAddress(1), backupSidecarPort): {backupName},
 		fmt.Sprintf("%s:%d", getPodIpAddress(2), backupSidecarPort): {backupName},
