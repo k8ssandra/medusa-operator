@@ -2,7 +2,7 @@ package controllers
 
 import (
 	"context"
-	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
+	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"

@@ -3,8 +3,8 @@ package controllers
 import (
 	"context"
 	"github.com/bombsimon/logrusr"
-	cassdcapi "github.com/datastax/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	"github.com/go-logr/logr"
+	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
