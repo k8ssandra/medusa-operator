@@ -36,27 +36,16 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 	dcKey := types.NamespacedName{Namespace: "default", Name: TestCassandraDatacenterName}
 
 	t.Log("check that the datacenter is set to be stopped")
-	require.Eventually(t, func() bool {
-		dc := &cassdcapi.CassandraDatacenter{}
-		err := testClient.Get(ctx, dcKey, dc)
-		if err != nil {
-			return false
-		}
+	require.Eventually(t, withDatacenter(t, dcKey, func(dc *cassdcapi.CassandraDatacenter) bool {
 		return dc.Spec.Stopped == true
-	}, timeout, interval, "timed out waiting for CassandraDatacenter stopped flag to be set")
+	}), timeout, interval, "timed out waiting for CassandraDatacenter stopped flag to be set")
 
 	t.Log("delete datacenter pods to simulate shutdown")
 	err = testClient.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace("default"), client.MatchingLabels{cassdcapi.DatacenterLabel: TestCassandraDatacenterName})
 	require.NoError(t, err, "failed to delete datacenter pods")
 
 	t.Log("check that the datacenter podTemplateSpec is updated")
-	require.Eventually(t, func() bool {
-		dc := &cassdcapi.CassandraDatacenter{}
-		err := testClient.Get(ctx, dcKey, dc)
-		if err != nil {
-			return false
-		}
-
+	require.Eventually(t, withDatacenter(t, dcKey, func(dc *cassdcapi.CassandraDatacenter) bool {
 		restoreContainer := findContainer(dc.Spec.PodTemplateSpec.Spec.InitContainers, "medusa-restore")
 		if restoreContainer == nil {
 			return false
@@ -69,17 +58,12 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 
 		envVar = findEnvVar(restoreContainer.Env, "RESTORE_KEY")
 		return envVar != nil
-	}, timeout, interval, "timed out waiting for CassandraDatacenter PodTemplateSpec update")
+	}), timeout, interval, "timed out waiting for CassandraDatacenter PodTemplateSpec update")
 
 	t.Log("check datacenter force update racks")
-	require.Eventually(t, func() bool {
-		dc := &cassdcapi.CassandraDatacenter{}
-		err := testClient.Get(ctx, dcKey, dc)
-		if err != nil {
-			return false
-		}
+	require.Eventually(t, withDatacenter(t, dcKey, func(dc *cassdcapi.CassandraDatacenter) bool {
 		return len(dc.Spec.ForceUpgradeRacks) == 1 && dc.Spec.ForceUpgradeRacks[0] == "rack1"
-	}, timeout, interval)
+	}), timeout, interval)
 
 	t.Log("check restore status start time set")
 	require.Eventually(t, func() bool {
@@ -93,14 +77,9 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 	}, timeout, interval)
 
 	t.Log("check datacenter restarted")
-	require.Eventually(t, func() bool {
-		dc := &cassdcapi.CassandraDatacenter{}
-		err := testClient.Get(ctx, dcKey, dc)
-		if err != nil {
-			return false
-		}
+	require.Eventually(t, withDatacenter(t, dcKey, func(dc *cassdcapi.CassandraDatacenter) bool {
 		return !dc.Spec.Stopped
-	}, timeout, interval)
+	}), timeout, interval)
 
 	t.Log("set datacenter status to updated and ready")
 	dc := &cassdcapi.CassandraDatacenter{}
@@ -143,6 +122,19 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 
 		return restore.Status.FinishTime.After(restore.Status.StartTime.Time)
 	}, timeout, interval)
+}
+
+// withDatacenter Fetches the CassandraDatacenter specified by key and then calls condition.
+func withDatacenter(t *testing.T, key types.NamespacedName, condition func(*cassdcapi.CassandraDatacenter) bool) func() bool {
+	return func() bool {
+		dc := &cassdcapi.CassandraDatacenter{}
+		if err := testClient.Get(context.Background(), key, dc); err == nil {
+			return condition(dc)
+		} else {
+			t.Logf("failed to get CassandraDatacenter: %s", err)
+			return false
+		}
+	}
 }
 
 func findContainer(containers []corev1.Container, name string) *corev1.Container {
