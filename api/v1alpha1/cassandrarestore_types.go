@@ -56,6 +56,8 @@ type CassandraRestoreStatus struct {
 
 	FinishTime metav1.Time `json:"finishTime,omitempty"`
 
+	DatacenterStopped metav1.Time `json:"datacenterStopped,omitempty"`
+
 	InProgress []string `json:"inProgress,omitempty"`
 
 	Finished []string `json:"finished,omitempty"`
