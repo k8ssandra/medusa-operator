@@ -9,6 +9,10 @@ Changelog for medusa-operator. New PRs should update the `master / unreleased` s
 * [BUGFIX]
 ```
 
+## Unreleased
+
+* [CHANGE] #46 Integrate Fossa component/license scanning
+
 ## v0.3.2
 * [BUGFIX] #44 Fix JSON patch script for CRD
 
