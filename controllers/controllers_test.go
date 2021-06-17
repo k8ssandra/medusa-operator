@@ -27,7 +27,8 @@ var medusaClientFactory *fakeMedusaClientFactory
 
 const (
 	TestCassandraDatacenterName = "dc1"
-	timeout                     = time.Second * 10
+	requeueAfter                = 2 * time.Second
+	timeout                     = time.Second * 3
 	interval                    = time.Millisecond * 250
 )
 
@@ -76,9 +77,10 @@ func beforeSuite(t *testing.T) {
 	require.NoError(err, "failed to set up CassandraBackupReconciler")
 
 	err = (&CassandraRestoreReconciler{
-		Client: k8sManager.GetClient(),
-		Log:    log.WithName("controllers").WithName("CassandraRestore"),
-		Scheme: scheme.Scheme,
+		Client:       k8sManager.GetClient(),
+		Log:          log.WithName("controllers").WithName("CassandraRestore"),
+		Scheme:       scheme.Scheme,
+		RequeueAfter: requeueAfter,
 	}).SetupWithManager(k8sManager)
 	require.NoError(err, "failed to set up CassandraRestoreReconciler")
 

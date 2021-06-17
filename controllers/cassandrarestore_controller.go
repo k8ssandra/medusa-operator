@@ -18,253 +18,204 @@ package controllers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"fmt"
-	"k8s.io/kubernetes/pkg/util/hash"
+	"github.com/k8ssandra/medusa-operator/pkg/cassandra"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"time"
 
 	"github.com/go-logr/logr"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/google/uuid"
 	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
+	"github.com/k8ssandra/medusa-operator/pkg/reconcile"
 )
 
 const (
 	restoreContainerName = "medusa-restore"
+	backupNameEnvVar     = "BACKUP_NAME"
+	restoreKeyEnvVar     = "RESTORE_KEY"
 )
 
 // CassandraRestoreReconciler reconciles a CassandraRestore object
 type CassandraRestoreReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log          logr.Logger
+	Scheme       *runtime.Scheme
+	RequeueAfter time.Duration
 }
 
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrarestores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrarestores/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrarebackups,verbs=get;list;watch
-// +kubebuilder:rbac:groups=cassandra.datastax.com,namespace="medusa-operator",resources=cassandradatacenters,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups=cassandra.datastax.com,namespace="medusa-operator",resources=cassandradatacenters,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=apps,namespace="medusa-operator",resources=statefulsets,verbs=list;watch
 
 func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	_ = r.Log.WithValues("cassandrarestore", req.NamespacedName)
 
-	instance := &api.CassandraRestore{}
-	err := r.Get(ctx, req.NamespacedName, instance)
+	factory := reconcile.NewFactory(r.Client, r.Log)
+	request, result, err := factory.NewRestoreRequest(ctx, req.NamespacedName)
+
+	if result != nil {
+		return *result, err
+	}
+
+	request.SetRestoreStartTime(metav1.Now())
+	request.SetRestoreKey(uuid.New().String())
+
+	if request.Restore.Spec.Shutdown && request.Restore.Status.DatacenterStopped.IsZero() {
+		if stopped := stopDatacenter(request); !stopped {
+			return r.applyUpdatesAndRequeue(ctx, request)
+		}
+	}
+
+	if err := updateRestoreInitContainer(request); err != nil {
+		request.Log.Error(err, "The datacenter is not properly configured for backup/restore")
+		// No need to requeue here because the datacenter is not properly configured for
+		// backup/restore with Medusa.
+		return ctrl.Result{}, err
+	}
+
+	complete, err := r.podTemplateSpecUpdateComplete(ctx, request)
+
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		request.Log.Error(err, "Failed to check if datacenter update is complete")
+		// Not going to bother applying updates here since we hit an error.
+		return ctrl.Result{RequeueAfter: r.RequeueAfter}, err
 	}
 
-	restore := instance.DeepCopy()
-
-	if len(restore.Status.RestoreKey) == 0 {
-		if err = r.setRestoreKey(ctx, restore); err != nil {
-			// Could be stale item, we'll just requeue - this process can be repeated
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
+	if !complete {
+		request.Log.Info("Waiting for datacenter update to complete")
+		return r.applyUpdatesAndRequeue(ctx, request)
 	}
 
-	// See if the restore is already in progress
-	if !restore.Status.StartTime.IsZero() {
-		cassdcKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.CassandraDatacenter.Name}
-		cassdc := &cassdcapi.CassandraDatacenter{}
+	request.Log.Info("The datacenter has been updated")
 
-		if err = r.Get(ctx, cassdcKey, cassdc); err != nil {
-			// TODO add some additional logging and/or generate an event if the error is not found
-			if errors.IsNotFound(err) {
-				r.Log.Error(err, "cassandradatacenter not found", "CassandraDatacenter", cassdcKey)
+	if request.Datacenter.Spec.Stopped {
+		request.Log.Info("Starting the datacenter")
+		request.Datacenter.Spec.Stopped = false
 
-				patch := client.MergeFrom(restore.DeepCopy())
-				restore.Status.FinishTime = metav1.Now()
-				if err = r.Status().Patch(ctx, restore, patch); err == nil {
-					return ctrl.Result{Requeue: false}, err
-				} else {
-					r.Log.Error(err, "failed to patch status with end time")
-					return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-				}
-			} else {
-				r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-			}
-		}
-
-		if isCassdcReady(cassdc) && wasCassdcUpdated(restore.Status.StartTime.Time, cassdc) {
-			r.Log.Info("the cassandradatacenter has been restored and is ready", "CassandraDatacenter", cassdcKey)
-
-			patch := client.MergeFrom(restore.DeepCopy())
-			restore.Status.FinishTime = metav1.Now()
-			if err = r.Status().Patch(ctx, restore, patch); err == nil {
-				return ctrl.Result{Requeue: false}, err
-			} else {
-				r.Log.Error(err, "failed to patch status with end time")
-				return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-			}
-		}
-
-		// TODO handle scenarios in which the CassandraDatacenter fails to become ready
-
-		r.Log.Info("waiting for CassandraDatacenter to come online", "CassandraDatacenter", cassdcKey)
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return r.applyUpdatesAndRequeue(ctx, request)
 	}
 
-	backupKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.Backup}
-	backup := &api.CassandraBackup{}
-
-	if err = r.Get(ctx, backupKey, backup); err != nil {
-		// TODO add some additional logging and/or generate an event if the error is not found
-		r.Log.Error(err, "failed to get backup", "CassandraBackup", backupKey)
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+	if !cassandra.DatacenterReady(request.Datacenter) {
+		request.Log.Info("Waiting for datacenter to come back online")
+		return r.applyUpdatesAndRequeue(ctx, request)
 	}
 
-	if restore.Spec.InPlace {
-		r.Log.Info("performing in place restore")
-
-		cassdcKey := types.NamespacedName{Namespace: req.Namespace, Name: restore.Spec.CassandraDatacenter.Name}
-		cassdc := &cassdcapi.CassandraDatacenter{}
-
-		if err = r.Get(ctx, cassdcKey, cassdc); err != nil {
-			r.Log.Error(err, "failed to get cassandradatacenter", "CassandraDatacenter", cassdcKey)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		}
-
-		cassdc = cassdc.DeepCopy()
-
-		if restore.Spec.Shutdown {
-			if cassdc.Spec.Stopped {
-				// If cass-operator hasn't finished shutting down all the pods, requeue and check later again
-				podList := &corev1.PodList{}
-				r.List(ctx, podList, client.InNamespace(req.Namespace), client.MatchingLabels(map[string]string{"cassandra.datastax.com/datacenter": restore.Spec.CassandraDatacenter.Name}))
-
-				if len(podList.Items) > 0 {
-					// Some pods have not been shutdown yet
-					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-				}
-			} else {
-				cassdc.Spec.Stopped = true
-				// Patch it
-				if err = r.Update(ctx, cassdc); err != nil {
-					r.Log.Error(err, "failed to update the cassandradatacenter", "CassandraDatacenter", cassdcKey)
-					return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-				}
-
-				// Wait for next time if it's ready
-				r.Log.Info("the cassandradatacenter has been updated and will be shutdown", "CassandraDatacenter", cassdcKey)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-			}
-		}
-
-		beforeHash := deepHashString(cassdc.Spec.PodTemplateSpec)
-
-		if err = setBackupNameInRestoreContainer(backup.Spec.Name, cassdc); err != nil {
-			r.Log.Error(err, "failed to set backup name in restore container", "CassandraDatacenter", cassdcKey)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		}
-
-		if err = setRestoreKeyInRestoreContainer(restore.Status.RestoreKey, cassdc); err != nil {
-			r.Log.Error(err, "failed to set restore key in restore container", "CassandraDatacenter", cassdcKey)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		}
-
-		afterHash := deepHashString(cassdc.Spec.PodTemplateSpec)
-
-		if restore.Spec.Shutdown {
-			// cass-operator does not apply updates to the StatefulSet's template spec until
-			// pods are ready. This means that when we shutdown and update the template spec
-			// with the backup name and the restore key, cass-operator first scales the
-			// StatefulSet back up and then only after the pods are ready does it update the
-			// template spec. This results in a StatefulSet update which has the effect of a
-			// cluster rolling restart. The following if block is a work around to avoid that
-			// rolling restart.
-			if beforeHash != afterHash {
-				racks := make([]string, 0, len(cassdc.Spec.Racks))
-				for _, rack := range cassdc.Spec.Racks {
-					racks = append(racks, rack.Name)
-				}
-				cassdc.Spec.ForceUpgradeRacks = racks
-
-				r.Log.Info("updating racks", "CassandraDatacenter", cassdcKey, "Racks", cassdc.Spec.ForceUpgradeRacks)
-
-				if err = r.Update(ctx, cassdc); err == nil {
-					return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-				}
-
-				r.Log.Error(err, "failed to force update racks", "CassandraDatacenter", cassdcKey)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-			}
-
-			if isCassdcUpdating(cassdc) {
-				r.Log.Info("waiting for rack updates to complete", "CassandraDatacenter", cassdcKey)
-				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-			}
-		}
-
-		patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		restore.Status.StartTime = metav1.Now()
-		if err = r.Status().Patch(ctx, restore, patch); err != nil {
-			r.Log.Error(err, "fail to patch status with start time")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-		}
-
-		if restore.Spec.Shutdown {
-			// Restart the cluster
-			cassdc.Spec.Stopped = false
-			r.Log.Info("restarting the CassandraDatacenter", "CassandraDatacenter", cassdcKey)
-		}
-
-		if err = r.Update(ctx, cassdc); err == nil {
-			r.Log.Info("the cassandradatacenter has been updated and will be restarted", "CassandraDatacenter", cassdcKey)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		} else {
-			r.Log.Error(err, "failed to update the cassandradatacenter", "CassandraDatacenter", cassdcKey)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		}
+	request.SetRestoreFinishTime(metav1.Now())
+	if err := r.applyUpdates(ctx, request); err != nil {
+		return ctrl.Result{RequeueAfter: r.RequeueAfter}, err
 	}
 
-	r.Log.Info("restoring to new cassandradatacenter")
-
-	newCassdc, err := buildNewCassandraDatacenter(restore, backup)
-	if err != nil {
-		r.Log.Error(err, "failed to build new cassandradatacenter")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-	}
-
-	cassdcKey := types.NamespacedName{Namespace: newCassdc.Namespace, Name: newCassdc.Name}
-
-	r.Log.Info("creating new cassandradatacenter", "CassandraDatacenter", cassdcKey)
-
-	if err = r.Create(ctx, newCassdc); err == nil {
-		patch := client.MergeFrom(restore.DeepCopy())
-		restore.Status.StartTime = metav1.Now()
-		if err = r.Status().Patch(ctx, restore, patch); err != nil {
-			r.Log.Error(err, "fail to patch status with start time")
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, err
-		} else {
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
-		}
-	} else {
-		r.Log.Error(err, "failed to create cassandradatacenter", "CassandraDatacenter", cassdcKey)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
+	request.Log.Info("The restore operation is complete")
+	return ctrl.Result{}, nil
 }
 
-func (r *CassandraRestoreReconciler) setRestoreKey(ctx context.Context, restore *api.CassandraRestore) error {
-	key := uuid.New()
-	patch := client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	restore.Status.RestoreKey = key.String()
+// applyUpdates patches the CassandraDatacenter if its spec has been updated and patches
+// the CassandraRestore if its status has been updated.
+func (r *CassandraRestoreReconciler) applyUpdates(ctx context.Context, req *reconcile.RestoreRequest) error {
+	if req.DatacenterModified() {
+		if err := r.Patch(ctx, req.Datacenter, req.GetDatacenterPatch()); err != nil {
+			if errors.IsResourceExpired(err) {
+				req.Log.Info("CassandraDatacenter version expired!")
+			}
+			req.Log.Error(err, "Failed to patch the CassandraDatacenter")
+			return err
+		}
+	}
 
-	return r.Status().Patch(ctx, restore, patch)
+	if req.RestoreModified() {
+		if err := r.Status().Patch(ctx, req.Restore, req.GetRestorePatch()); err != nil {
+			req.Log.Error(err, "Failed to patch the CassandraRestore")
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *CassandraRestoreReconciler) applyUpdatesAndRequeue(ctx context.Context, req *reconcile.RestoreRequest) (ctrl.Result, error) {
+	if err := r.applyUpdates(ctx, req); err != nil {
+		req.Log.Error(err, "Failed to apply updates")
+		return ctrl.Result{RequeueAfter: r.RequeueAfter}, err
+	}
+	return ctrl.Result{RequeueAfter: r.RequeueAfter}, nil
+}
+
+// updateRestoreInitContainer sets the backup name and restore key env vars in the restore
+// init container. An error is returned if the container is not found.
+func updateRestoreInitContainer(req *reconcile.RestoreRequest) error {
+	if err := setBackupNameInRestoreContainer(req.Backup.Spec.Name, req.Datacenter); err != nil {
+		return err
+	}
+	return setRestoreKeyInRestoreContainer(req.Restore.Status.RestoreKey, req.Datacenter)
+}
+
+// podTemplateSpecUpdateComplete checks that the pod template spec changes, namely the ones
+// with the restore container, have been pushed down to the StatefulSets. Return true if
+// the changes have been applied.
+func (r *CassandraRestoreReconciler) podTemplateSpecUpdateComplete(ctx context.Context, req *reconcile.RestoreRequest) (bool, error) {
+	if updated := cassandra.DatacenterUpdatedAfter(req.Restore.Status.DatacenterStopped.Time, req.Datacenter); !updated {
+		return false, nil
+	}
+
+	// It may not be sufficient to check for the update only via status conditions. We will
+	// check the template spec of the StatefulSets to be certain that the update has been
+	// applied. We do this in order to avoid an extra rolling restart after the
+	// StatefulSets are scaled back up.
+
+	statefulsetList := &appsv1.StatefulSetList{}
+	labels := client.MatchingLabels{cassdcapi.ClusterLabel: req.Datacenter.Spec.ClusterName, cassdcapi.DatacenterLabel: req.Datacenter.Name}
+
+	if err := r.List(ctx, statefulsetList, labels); err != nil {
+		req.Log.Error(err, "Failed to get StatefulSets")
+		return false, err
+	}
+
+	for _, statefulset := range statefulsetList.Items {
+		container := getRestoreInitContainerFromStatefulSet(&statefulset)
+
+		if container == nil {
+			return false, nil
+		}
+
+		if !containerHasEnvVar(container, backupNameEnvVar, req.Backup.Spec.Name) {
+			return false, nil
+		}
+
+		if !containerHasEnvVar(container, restoreKeyEnvVar, req.Restore.Status.RestoreKey) {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+// stopDatacenter sets the Stopped property in the Datacenter spec to true. Returns true if
+// the datacenter is stopped.
+func stopDatacenter(req *reconcile.RestoreRequest) bool {
+	if cassandra.DatacenterStopped(req.Datacenter) {
+		req.Log.Info("The datacenter is stopped", "Status", req.Datacenter.Status)
+		req.SetDatacenterStoppedTime(metav1.Now())
+		return true
+	}
+
+	if cassandra.DatacenterStopping(req.Datacenter) {
+		req.Log.Info("Waiting for datacenter to stop")
+		return false
+	}
+
+	req.Log.Info("Stopping datacenter")
+	req.Datacenter.Spec.Stopped = true
+	return false
 }
 
 func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.CassandraBackup) (*cassdcapi.CassandraDatacenter, error) {
@@ -295,40 +246,40 @@ func setBackupNameInRestoreContainer(backupName string, cassdc *cassdcapi.Cassan
 
 	restoreContainer := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
 	envVars := restoreContainer.Env
-	envVarIdx := getEnvVarIndex("BACKUP_NAME", envVars)
+	envVarIdx := getEnvVarIndex(backupNameEnvVar, envVars)
 
 	if envVarIdx > -1 {
 		envVars[envVarIdx].Value = backupName
 	} else {
-		envVars = append(envVars, corev1.EnvVar{Name: "BACKUP_NAME", Value: backupName})
+		envVars = append(envVars, corev1.EnvVar{Name: backupNameEnvVar, Value: backupName})
 	}
 	restoreContainer.Env = envVars
 
 	return nil
 }
 
-func setRestoreKeyInRestoreContainer(restoreKey string, cassdc *cassdcapi.CassandraDatacenter) error {
-	index, err := getRestoreInitContainerIndex(cassdc)
+func setRestoreKeyInRestoreContainer(restoreKey string, dc *cassdcapi.CassandraDatacenter) error {
+	index, err := getRestoreInitContainerIndex(dc)
 	if err != nil {
 		return err
 	}
 
-	restoreContainer := &cassdc.Spec.PodTemplateSpec.Spec.InitContainers[index]
+	restoreContainer := &dc.Spec.PodTemplateSpec.Spec.InitContainers[index]
 	envVars := restoreContainer.Env
-	envVarIdx := getEnvVarIndex("RESTORE_KEY", envVars)
+	envVarIdx := getEnvVarIndex(restoreKeyEnvVar, envVars)
 
 	if envVarIdx > -1 {
 		envVars[envVarIdx].Value = restoreKey
 	} else {
-		envVars = append(envVars, corev1.EnvVar{Name: "RESTORE_KEY", Value: restoreKey})
+		envVars = append(envVars, corev1.EnvVar{Name: restoreKeyEnvVar, Value: restoreKey})
 	}
 	restoreContainer.Env = envVars
 
 	return nil
 }
 
-func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, error) {
-	spec := cassdc.Spec.PodTemplateSpec
+func getRestoreInitContainerIndex(dc *cassdcapi.CassandraDatacenter) (int, error) {
+	spec := dc.Spec.PodTemplateSpec
 	initContainers := &spec.Spec.InitContainers
 
 	for i, container := range *initContainers {
@@ -340,6 +291,16 @@ func getRestoreInitContainerIndex(cassdc *cassdcapi.CassandraDatacenter) (int, e
 	return 0, fmt.Errorf("restore initContainer (%s) not found", restoreContainerName)
 }
 
+func containerHasEnvVar(container *corev1.Container, name, value string) bool {
+	idx := getEnvVarIndex(name, container.Env)
+
+	if idx < 0 {
+		return false
+	}
+
+	return container.Env[idx].Value == value
+}
+
 func getEnvVarIndex(name string, envVars []corev1.EnvVar) int {
 	for i, envVar := range envVars {
 		if envVar.Name == name {
@@ -349,38 +310,17 @@ func getEnvVarIndex(name string, envVars []corev1.EnvVar) int {
 	return -1
 }
 
-func wasCassdcUpdated(startTime time.Time, cassdc *cassdcapi.CassandraDatacenter) bool {
-	updateCondition, found := cassdc.GetCondition(cassdcapi.DatacenterUpdating)
-	if !found || updateCondition.Status != corev1.ConditionFalse {
-		return false
+func getRestoreInitContainerFromStatefulSet(statefulset *appsv1.StatefulSet) *corev1.Container {
+	for _, container := range statefulset.Spec.Template.Spec.InitContainers {
+		if container.Name == restoreContainerName {
+			return &container
+		}
 	}
-	return updateCondition.LastTransitionTime.After(startTime)
-}
-
-func isCassdcReady(cassdc *cassdcapi.CassandraDatacenter) bool {
-	if cassdc.Status.CassandraOperatorProgress != cassdcapi.ProgressReady {
-		return false
-	}
-
-	statusReady := cassdc.GetConditionStatus(cassdcapi.DatacenterReady)
-	return statusReady == corev1.ConditionTrue
-}
-
-func isCassdcUpdating(cassdc *cassdcapi.CassandraDatacenter) bool {
-	statusUpdating := cassdc.GetConditionStatus(cassdcapi.DatacenterUpdating)
-	return statusUpdating == corev1.ConditionTrue && cassdc.Status.CassandraOperatorProgress == cassdcapi.ProgressUpdating
+	return nil
 }
 
 func (r *CassandraRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&api.CassandraRestore{}).
 		Complete(r)
-}
-
-func deepHashString(obj interface{}) string {
-	hasher := sha256.New()
-	hash.DeepHashObject(hasher, obj)
-	hashBytes := hasher.Sum([]byte{})
-	b64Hash := base64.StdEncoding.EncodeToString(hashBytes)
-	return b64Hash
 }

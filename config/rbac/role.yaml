@@ -17,6 +17,13 @@ rules:
   - list
   - watch
 - apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - list
+  - watch
+- apiGroups:
   - cassandra.datastax.com
   resources:
   - cassandradatacenters
@@ -24,6 +31,7 @@ rules:
   - create
   - get
   - list
+  - patch
   - update
   - watch
 - apiGroups:

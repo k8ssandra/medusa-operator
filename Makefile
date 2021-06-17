@@ -96,6 +96,9 @@ docker-build:
 	docker build . -t ${REV_IMAGE}
 	docker tag ${REV_IMAGE} ${LATEST_IMAGE}
 
+kind-docker-load:
+	kind load docker-image k8ssandra/medusa-operator:latest
+
 # Push the docker image
 docker-push:
 	docker push ${REV_IMAGE}

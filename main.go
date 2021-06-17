@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/k8ssandra/medusa-operator/pkg/medusa"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -91,9 +92,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err = (&controllers.CassandraRestoreReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("CassandraRestore"),
-		Scheme: mgr.GetScheme(),
+		Client:       mgr.GetClient(),
+		Log:          ctrl.Log.WithName("controllers").WithName("CassandraRestore"),
+		Scheme:       mgr.GetScheme(),
+		RequeueAfter: 10 * time.Second,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CassandraRestore")
 		os.Exit(1)
