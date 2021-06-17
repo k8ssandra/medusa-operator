@@ -247,6 +247,7 @@ func (in *CassandraRestoreStatus) DeepCopyInto(out *CassandraRestoreStatus) {
 	*out = *in
 	in.StartTime.DeepCopyInto(&out.StartTime)
 	in.FinishTime.DeepCopyInto(&out.FinishTime)
+	in.DatacenterStopped.DeepCopyInto(&out.DatacenterStopped)
 	if in.InProgress != nil {
 		in, out := &in.InProgress, &out.InProgress
 		*out = make([]string, len(*in))

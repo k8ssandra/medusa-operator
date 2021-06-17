@@ -46,8 +46,9 @@ const (
 // CassandraRestoreReconciler reconciles a CassandraRestore object
 type CassandraRestoreReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log          logr.Logger
+	Scheme       *runtime.Scheme
+	RequeueAfter time.Duration
 }
 
 // +kubebuilder:rbac:groups=cassandra.k8ssandra.io,namespace="medusa-operator",resources=cassandrarestores,verbs=get;list;watch;create;update;patch;delete
@@ -87,7 +88,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 	if err != nil {
 		request.Log.Error(err, "Failed to check if datacenter update is complete")
 		// Not going to bother applying updates here since we hit an error.
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		return ctrl.Result{RequeueAfter: r.RequeueAfter}, err
 	}
 
 	if !complete {
@@ -111,7 +112,7 @@ func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, e
 
 	request.SetRestoreFinishTime(metav1.Now())
 	if err := r.applyUpdates(ctx, request); err != nil {
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		return ctrl.Result{RequeueAfter: r.RequeueAfter}, err
 	}
 
 	request.Log.Info("The restore operation is complete")
@@ -144,9 +145,9 @@ func (r *CassandraRestoreReconciler) applyUpdates(ctx context.Context, req *reco
 func (r *CassandraRestoreReconciler) applyUpdatesAndRequeue(ctx context.Context, req *reconcile.RestoreRequest) (ctrl.Result, error) {
 	if err := r.applyUpdates(ctx, req); err != nil {
 		req.Log.Error(err, "Failed to apply updates")
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		return ctrl.Result{RequeueAfter: r.RequeueAfter}, err
 	}
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	return ctrl.Result{RequeueAfter: r.RequeueAfter}, nil
 }
 
 // updateRestoreInitContainer sets the backup name and restore key env vars in the restore
@@ -216,7 +217,6 @@ func stopDatacenter(req *reconcile.RestoreRequest) bool {
 	req.Datacenter.Spec.Stopped = true
 	return false
 }
-
 
 func buildNewCassandraDatacenter(restore *api.CassandraRestore, backup *api.CassandraBackup) (*cassdcapi.CassandraDatacenter, error) {
 	newCassdc := &cassdcapi.CassandraDatacenter{
@@ -324,4 +324,3 @@ func (r *CassandraRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&api.CassandraRestore{}).
 		Complete(r)
 }
-

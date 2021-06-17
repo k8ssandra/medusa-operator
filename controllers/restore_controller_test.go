@@ -32,6 +32,8 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 		},
 	}
 
+	restoreKey := types.NamespacedName{Namespace: restore.Namespace, Name: restore.Name}
+
 	err := testClient.Create(ctx, restore)
 	require.NoError(err, "failed to create CassandraRestore")
 
@@ -47,6 +49,22 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 	t.Log("delete datacenter pods to simulate shutdown")
 	err = testClient.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace("default"), client.MatchingLabels{cassdcapi.DatacenterLabel: TestCassandraDatacenterName})
 	require.NoError(err, "failed to delete datacenter pods")
+
+	restore = &api.CassandraRestore{}
+	err = testClient.Get(ctx, restoreKey, restore)
+	require.NoError(err, "failed to get CassandraRestore")
+
+	dcStoppedTime := restore.Status.StartTime.Time.Add(1 * time.Second)
+
+	t.Log("set datacenter status to stopped")
+	err = patchDatacenterStatus(ctx, dcKey, func(dc *cassdcapi.CassandraDatacenter) {
+		dc.SetCondition(cassdcapi.DatacenterCondition{
+			Type:               cassdcapi.DatacenterStopped,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(dcStoppedTime),
+		})
+	})
+	require.NoError(err, "failed to update datacenter status with stopped condition")
 
 	t.Log("check that the datacenter podTemplateSpec is updated")
 	require.Eventually(withDc(func(dc *cassdcapi.CassandraDatacenter) bool {
@@ -64,57 +82,47 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 		return envVar != nil
 	}), timeout, interval, "timed out waiting for CassandraDatacenter PodTemplateSpec update")
 
-	t.Log("check datacenter force update racks")
-	require.Eventually(withDc(func(dc *cassdcapi.CassandraDatacenter) bool {
-		return len(dc.Spec.ForceUpgradeRacks) == 1 && dc.Spec.ForceUpgradeRacks[0] == "rack1"
-	}), timeout, interval)
+	restore = &api.CassandraRestore{}
+	err = testClient.Get(ctx, restoreKey, restore)
+	require.NoError(err, "failed to get CassandraRestore")
 
-	t.Log("check restore status start time set")
-	require.Eventually(func() bool {
-		restore := &api.CassandraRestore{}
-		err := testClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-restore"}, restore)
-		if err != nil {
-			return false
-		}
+	// In addition to checking Updating condition, the restore controller also checks the
+	// PodTemplateSpec of the StatefulSets to make sure the update has been pushed down.
+	// Note that this test does **not** verify the StatefulSet check. cass-operator creates
+	// the StatefulSets. While we could create the StatefulSets in this test, it will be
+	// easier/better to verify the StatefulSet checks in unit and e2e tests.
+	t.Log("set datacenter status to updated")
+	err = patchDatacenterStatus(ctx, dcKey, func(dc *cassdcapi.CassandraDatacenter) {
+		dc.SetCondition(cassdcapi.DatacenterCondition{
+			Type:               cassdcapi.DatacenterUpdating,
+			Status:             corev1.ConditionFalse,
+			LastTransitionTime: metav1.NewTime(restore.Status.DatacenterStopped.Add(time.Second * 1)),
+		})
+	})
+	require.NoError(err, "failed to update datacenter status with updating condition")
 
-		return !restore.Status.StartTime.IsZero()
-	}, timeout, interval)
+	dc := &cassdcapi.CassandraDatacenter{}
+	err = testClient.Get(ctx, dcKey, dc)
+	require.NoError(err)
+
+	restore = &api.CassandraRestore{}
+	err = testClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-restore"}, restore)
+	require.NoError(err)
 
 	t.Log("check datacenter restarted")
 	require.Eventually(withDc(func(dc *cassdcapi.CassandraDatacenter) bool {
 		return !dc.Spec.Stopped
 	}), timeout, interval)
 
-	t.Log("set datacenter status to updated and ready")
-	dc := &cassdcapi.CassandraDatacenter{}
-	err = testClient.Get(ctx, dcKey, dc)
-	require.NoError(err, "failed to get datacenter")
-
-	restore = &api.CassandraRestore{}
-	err = testClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-restore"}, restore)
-	require.NoError(err, "failed to get restore object")
-
-	dc.SetCondition(cassdcapi.DatacenterCondition{
-		Type:               cassdcapi.DatacenterUpdating,
-		Status:             corev1.ConditionFalse,
-		LastTransitionTime: metav1.NewTime(restore.Status.StartTime.Time.Add(10 * time.Second)),
+	t.Log("set datacenter status to ready")
+	err = patchDatacenterStatus(ctx, dcKey, func(dc *cassdcapi.CassandraDatacenter) {
+		dc.Status.CassandraOperatorProgress = cassdcapi.ProgressReady
+		dc.SetCondition(cassdcapi.DatacenterCondition{
+			Type:               cassdcapi.DatacenterReady,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.NewTime(dcStoppedTime.Add(time.Second * 2)),
+		})
 	})
-	dc.SetCondition(cassdcapi.DatacenterCondition{
-		Type:               cassdcapi.DatacenterReady,
-		Status:             corev1.ConditionTrue,
-		LastTransitionTime: metav1.Now(),
-	})
-	dc.Status.CassandraOperatorProgress = cassdcapi.ProgressReady
-	dc.Status.SuperUserUpserted = metav1.Now()
-	dc.Status.UsersUpserted = metav1.Now()
-	dc.Status.LastServerNodeStarted = metav1.Now()
-	dc.Status.LastRollingRestart = metav1.Now()
-	dc.Status.NodeStatuses = cassdcapi.CassandraStatusMap{}
-	dc.Status.NodeReplacements = []string{}
-	dc.Status.QuietPeriod = metav1.Now()
-
-	err = testClient.Status().Update(ctx, dc)
-	require.NoError(err, "failed to set datacenter status to updated and ready")
 
 	t.Log("check restore status finish time set")
 	require.Eventually(func() bool {
@@ -124,7 +132,7 @@ func testInPlaceRestore(t *testing.T, ctx context.Context, namespace string) {
 			return false
 		}
 
-		return restore.Status.FinishTime.After(restore.Status.StartTime.Time)
+		return !restore.Status.FinishTime.IsZero()
 	}, timeout, interval)
 }
 
@@ -165,3 +173,19 @@ func findEnvVar(envVars []corev1.EnvVar, name string) *corev1.EnvVar {
 	}
 	return nil
 }
+
+func patchDatacenterStatus(ctx context.Context, key types.NamespacedName, updateFn func(dc *cassdcapi.CassandraDatacenter)) error {
+	dc := &cassdcapi.CassandraDatacenter{}
+	err := testClient.Get(ctx, key, dc)
+
+	if err != nil {
+		return err
+	}
+
+	patch := client.MergeFromWithOptions(dc.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	updateFn(dc)
+
+	return testClient.Status().Patch(ctx, dc, patch)
+}
+
+//func updateStatefulSet

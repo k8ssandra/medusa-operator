@@ -17,19 +17,19 @@ import (
 )
 
 type RestoreRequest struct {
-	Log             logr.Logger
+	Log logr.Logger
 
-	Restore         *api.CassandraRestore
+	Restore *api.CassandraRestore
 
-	Backup          *api.CassandraBackup
+	Backup *api.CassandraBackup
 
-	Datacenter      *cassdcapi.CassandraDatacenter
+	Datacenter *cassdcapi.CassandraDatacenter
 
-	restoreHash     string
+	restoreHash string
 
-	datacenterHash  string
+	datacenterHash string
 
-	restorePatch    client.Patch
+	restorePatch client.Patch
 
 	datacenterPatch client.Patch
 }
@@ -52,7 +52,7 @@ type factory struct {
 func NewFactory(client client.Client, logger logr.Logger) RequestFactory {
 	return &factory{
 		Client: client,
-		Log: logger,
+		Log:    logger,
 	}
 }
 
@@ -93,13 +93,13 @@ func (f *factory) NewRestoreRequest(ctx context.Context, restoreKey types.Namesp
 	datacenterHash := deepHashString(dc.Spec)
 
 	req := RestoreRequest{
-		Log: reqLogger,
-		Restore: restore.DeepCopy(),
-		Backup: backup.DeepCopy(),
-		Datacenter: dc.DeepCopy(),
-		restoreHash: restoreHash,
-		datacenterHash: datacenterHash,
-		restorePatch: client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{}),
+		Log:             reqLogger,
+		Restore:         restore.DeepCopy(),
+		Backup:          backup.DeepCopy(),
+		Datacenter:      dc.DeepCopy(),
+		restoreHash:     restoreHash,
+		datacenterHash:  datacenterHash,
+		restorePatch:    client.MergeFromWithOptions(restore.DeepCopy(), client.MergeFromWithOptimisticLock{}),
 		datacenterPatch: client.MergeFromWithOptions(dc.DeepCopy(), client.MergeFromWithOptimisticLock{}),
 	}
 
