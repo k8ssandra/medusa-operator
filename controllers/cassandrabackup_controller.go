@@ -336,6 +336,12 @@ func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Conte
 
 	podList := &corev1.PodList{}
 	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: cassdcSvc.Spec.Selector})
+
+	if err != nil {
+		r.Log.Error(err, "failed to get selector for CassandraDatacenter", "CassandraDatacenter", cassdc.Name)
+		return nil, err
+	}
+
 	listOpts := []client.ListOption{
 		client.MatchingLabelsSelector{
 			Selector: selector,
@@ -347,12 +353,7 @@ func (r *CassandraBackupReconciler) getCassandraDatacenterPods(ctx context.Conte
 		return nil, err
 	}
 
-	pods := make([]corev1.Pod, 0)
-	for _, pod := range podList.Items {
-		pods = append(pods, pod)
-	}
-
-	return pods, nil
+	return podList.Items, nil
 }
 
 func isMedusaDeployed(pods []corev1.Pod) bool {
