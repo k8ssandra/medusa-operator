@@ -186,6 +186,51 @@ func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
 		fmt.Sprintf("%s:%d", getPodIpAddress(1), backupSidecarPort): {backupName},
 		fmt.Sprintf("%s:%d", getPodIpAddress(2), backupSidecarPort): {backupName},
 	})
+}
+
+func deleteBackupFinalizer(t *testing.T, ctx context.Context, namespace string) {
+	assert := assert.New(t)
+	require := require.New(t)
+	backupName := "test-backup-2"
+
+	t.Log("creating CassandraBackup")
+	backupKey := types.NamespacedName{Namespace: namespace, Name: backupName}
+	backup := &api.CassandraBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      backupName,
+		},
+		Spec: api.CassandraBackupSpec{
+			Name:                backupName,
+			CassandraDatacenter: TestCassandraDatacenterName,
+		},
+	}
+
+	err := testClient.Create(ctx, backup)
+	assert.NoError(err, "failed to create CassandraBackup")
+
+	t.Log("verify that the backups are started")
+	require.Eventually(func() bool {
+		updated := &api.CassandraBackup{}
+		err := testClient.Get(context.Background(), backupKey, updated)
+		if err != nil {
+			return false
+		}
+		return !updated.Status.StartTime.IsZero()
+	}, timeout, interval)
+
+	t.Log("verify the backup finished")
+	require.Eventually(func() bool {
+		updated := &api.CassandraBackup{}
+		err := testClient.Get(context.Background(), backupKey, updated)
+		if err != nil {
+			return false
+		}
+		return len(updated.Status.Finished) == 3 && len(updated.Status.InProgress) == 0
+	}, timeout, interval)
+
+	err = testClient.Get(context.Background(), backupKey, backup)
+	assert.NoError(err, "fetching backup should succeed")
 
 	t.Log("deleting the backup")
 	err = testClient.Delete(context.Background(), backup)
