@@ -55,8 +55,6 @@ type CassandraBackupStatus struct {
 	Finished []string `json:"finished,omitempty"`
 
 	Failed []string `json:"failed,omitempty"`
-
-	DeletionInProgress bool `json:"deletionInProgress,omitempty"`
 }
 
 // +kubebuilder:object:root=true

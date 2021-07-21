@@ -31,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlutil "sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
@@ -84,33 +85,17 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 		}
 	}
 
-	// GetDeletionTimestamp is set by the apiserver, not us. That's why we need another (DeletionInProgress) progress status
+	// GetDeletionTimestamp is set by the apiserver
 	if backup.GetDeletionTimestamp() != nil {
-		if backup.Status.DeletionInProgress {
-			r.Log.Info("CassandraBackup is being deleted already", "Backup", req.NamespacedName)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-
 		if ctrlutil.ContainsFinalizer(backup, finalizerName) {
-			patch := client.MergeFromWithOptions(backup.DeepCopy(), client.MergeFromWithOptimisticLock{})
-			backup.Status.DeletionInProgress = true
-
-			if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
-				// Probably stale item
-				return ctrl.Result{Requeue: true, RequeueAfter: 5 * time.Second}, nil
-			}
-
 			go func() {
 				r.Log.Info("Deletion of CassandraBackup started", "Backup", req.NamespacedName)
 				// Backup is being deleted, call Medusa to remove it also from storage
 				err = r.removeBackup(ctx, backup)
 				if err != nil {
+					// Implementation of Medusa does not guarantee if this will return an error or not, it
+					// depends on the implementation of backing store. Thus, failing here could leave ghost object that can't be deleted
 					r.Log.Error(err, "failed to remove backup", "Backup", req.NamespacedName)
-					patch := client.MergeFrom(backup.DeepCopy())
-					backup.Status.DeletionInProgress = false
-					if err := r.Status().Patch(context.Background(), backup, patch); err != nil {
-						r.Log.Error(err, "failed to patch status for deletion retry", "Backup", req.NamespacedName)
-					}
 					return
 				}
 
@@ -122,7 +107,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 					r.Log.Error(err, "failed to remove finalizer", "Backup", req.NamespacedName)
 				}
 			}()
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 	}
 
@@ -411,5 +396,6 @@ func removeValue(slice []string, value string) []string {
 func (r *CassandraBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&api.CassandraBackup{}).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
 		Complete(r)
 }
