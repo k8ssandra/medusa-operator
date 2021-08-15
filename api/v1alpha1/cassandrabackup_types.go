@@ -32,6 +32,9 @@ type CassandraBackupSpec struct {
 
 	// The name of the CassandraDatacenter to back up
 	CassandraDatacenter string `json:"cassandraDatacenter"`
+
+	//The type of the backup: "full" or "differential"
+	Type string `json:"backupType,omitempty"`
 }
 
 type CassandraDatacenterTemplateSpec struct {
