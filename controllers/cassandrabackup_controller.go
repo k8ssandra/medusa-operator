@@ -283,13 +283,13 @@ func hasMedusaSidecar(pod *corev1.Pod) bool {
 	return false
 }
 
-func doBackup(ctx context.Context, name string, backupType string, pod *corev1.Pod, clientFactory medusa.ClientFactory) error {
+func doBackup(ctx context.Context, name string, backupType api.BackupType, pod *corev1.Pod, clientFactory medusa.ClientFactory) error {
 	addr := fmt.Sprintf("%s:%d", pod.Status.PodIP, backupSidecarPort)
 	if medusaClient, err := clientFactory.NewClient(addr); err != nil {
 		return err
 	} else {
 		defer medusaClient.Close()
-		return medusaClient.CreateBackup(ctx, name, backupType)
+		return medusaClient.CreateBackup(ctx, name, string(backupType))
 	}
 }
 
