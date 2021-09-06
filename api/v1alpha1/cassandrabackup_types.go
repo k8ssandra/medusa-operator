@@ -24,6 +24,14 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// An enum of the possible modes for medusa backups
+type BackupType string
+
+const (
+	FullBackup         BackupType = "full"
+	DifferentialBackup BackupType = "differential"
+)
+
 // CassandraBackupSpec defines the desired state of CassandraBackup
 type CassandraBackupSpec struct {
 	// The name of the backup.
@@ -32,6 +40,11 @@ type CassandraBackupSpec struct {
 
 	// The name of the CassandraDatacenter to back up
 	CassandraDatacenter string `json:"cassandraDatacenter"`
+
+	// The type of the backup: "full" or "differential"
+	// +kubebuilder:validation:Enum=differential;full;
+	// +kubebuilder:default:=differential
+	Type BackupType `json:"backupType,omitempty"`
 }
 
 type CassandraDatacenterTemplateSpec struct {

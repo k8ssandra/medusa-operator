@@ -163,7 +163,7 @@ func (r *CassandraBackupReconciler) Reconcile(req ctrl.Request) (ctrl.Result, er
 			go func() {
 				r.Log.Info("starting backup", "CassandraPod", pod.Name)
 				succeeded := false
-				if err := doBackup(ctx, backup.Spec.Name, &pod, r.ClientFactory); err == nil {
+				if err := doBackup(ctx, backup.Spec.Name, backup.Spec.Type, &pod, r.ClientFactory); err == nil {
 					r.Log.Info("finished backup", "CassandraPod", pod.Name)
 					succeeded = true
 				} else {
@@ -283,13 +283,13 @@ func hasMedusaSidecar(pod *corev1.Pod) bool {
 	return false
 }
 
-func doBackup(ctx context.Context, name string, pod *corev1.Pod, clientFactory medusa.ClientFactory) error {
+func doBackup(ctx context.Context, name string, backupType api.BackupType, pod *corev1.Pod, clientFactory medusa.ClientFactory) error {
 	addr := fmt.Sprintf("%s:%d", pod.Status.PodIP, backupSidecarPort)
 	if medusaClient, err := clientFactory.NewClient(addr); err != nil {
 		return err
 	} else {
 		defer medusaClient.Close()
-		return medusaClient.CreateBackup(ctx, name)
+		return medusaClient.CreateBackup(ctx, name, string(backupType))
 	}
 }
 

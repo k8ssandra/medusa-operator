@@ -3,6 +3,11 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strconv"
+	"sync"
+	"testing"
+
 	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/k8ssandra/medusa-operator/pkg/medusa"
@@ -12,11 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"strconv"
-	"sync"
-	"testing"
 )
 
 func testBackupDatacenter(t *testing.T, ctx context.Context, namespace string) {
@@ -263,7 +264,7 @@ func (c *fakeMedusaClient) Close() error {
 	return nil
 }
 
-func (c *fakeMedusaClient) CreateBackup(ctx context.Context, name string) error {
+func (c *fakeMedusaClient) CreateBackup(ctx context.Context, name string, backupType string) error {
 	c.RequestedBackups = append(c.RequestedBackups, name)
 	return nil
 }

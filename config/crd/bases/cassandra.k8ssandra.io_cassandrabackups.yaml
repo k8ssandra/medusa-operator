@@ -38,6 +38,9 @@ spec:
               name:
                 description: The name of the backup. TODO document format of generated name
                 type: string
+              backupType:
+                description: The type of the backup, 'full' or 'differential'
+                type: string
             required:
             - cassandraDatacenter
             type: object

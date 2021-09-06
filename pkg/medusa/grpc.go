@@ -3,6 +3,7 @@ package medusa
 import (
 	"context"
 	"fmt"
+
 	"google.golang.org/grpc"
 
 	"github.com/k8ssandra/medusa-operator/pkg/pb"
@@ -33,7 +34,7 @@ func (f *DefaultFactory) NewClient(address string) (Client, error) {
 type Client interface {
 	Close() error
 
-	CreateBackup(ctx context.Context, name string) error
+	CreateBackup(ctx context.Context, name string, backupType string) error
 
 	GetBackups(ctx context.Context) ([]*pb.BackupSummary, error)
 }
@@ -42,10 +43,15 @@ func (c *defaultClient) Close() error {
 	return c.connection.Close()
 }
 
-func (c *defaultClient) CreateBackup(ctx context.Context, name string) error {
+func (c *defaultClient) CreateBackup(ctx context.Context, name string, backupType string) error {
+	backupMode := pb.BackupRequest_DIFFERENTIAL
+	if backupType == "full" {
+		backupMode = pb.BackupRequest_FULL
+	}
+
 	request := pb.BackupRequest{
 		Name: name,
-		Mode: pb.BackupRequest_DIFFERENTIAL,
+		Mode: backupMode,
 	}
 	_, err := c.grpcClient.Backup(ctx, &request)
 
