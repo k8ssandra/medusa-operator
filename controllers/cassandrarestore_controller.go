@@ -19,9 +19,10 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/k8ssandra/medusa-operator/pkg/cassandra"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -32,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/google/uuid"
-	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
+	cassdcapi "github.com/k8ssandra/cass-operator/apis/cassandra/v1beta1"
 	api "github.com/k8ssandra/medusa-operator/api/v1alpha1"
 	"github.com/k8ssandra/medusa-operator/pkg/reconcile"
 )
@@ -57,9 +58,7 @@ type CassandraRestoreReconciler struct {
 // +kubebuilder:rbac:groups=cassandra.datastax.com,namespace="medusa-operator",resources=cassandradatacenters,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=apps,namespace="medusa-operator",resources=statefulsets,verbs=list;watch
 
-func (r *CassandraRestoreReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	ctx := context.Background()
-
+func (r *CassandraRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	factory := reconcile.NewFactory(r.Client, r.Log)
 	request, result, err := factory.NewRestoreRequest(ctx, req.NamespacedName)
 

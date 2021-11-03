@@ -3,5 +3,7 @@ resources:
 
 images:
 - name: controller
-  newName: docker.io/k8ssandra/medusa-operator
+  newName: docker.io/adejanovski/medusa-operator
   newTag: latest
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
