@@ -1,9 +1,10 @@
 package cassandra
 
 import (
-	cassdcapi "github.com/k8ssandra/cass-operator/operator/pkg/apis/cassandra/v1beta1"
-	corev1 "k8s.io/api/core/v1"
 	"time"
+
+	cassdcapi "github.com/k8ssandra/cass-operator/apis/cassandra/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func DatacenterUpdatedAfter(t time.Time, dc *cassdcapi.CassandraDatacenter) bool {
